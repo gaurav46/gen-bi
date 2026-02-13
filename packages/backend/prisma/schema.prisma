@@ -1,0 +1,21 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model ConnectionConfig {
+  id                String   @id @default(uuid())
+  host              String
+  port              Int      @default(5432)
+  databaseName      String   @map("database_name")
+  username          String
+  encryptedPassword String   @map("encrypted_password")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@map("connection_configs")
+}
