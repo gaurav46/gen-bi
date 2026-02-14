@@ -12,6 +12,6 @@ export type QueryResult = {
 
 export interface TenantDatabasePort {
   connect(config: TenantConnectionConfig): Promise<void>;
-  query(sql: string): Promise<QueryResult>;
+  query(sql: string, params?: unknown[]): Promise<QueryResult>;
   disconnect(): Promise<void>;
 }

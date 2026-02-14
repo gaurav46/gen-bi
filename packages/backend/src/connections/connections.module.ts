@@ -18,6 +18,6 @@ import { SchemaDiscoveryModule } from '../schema-discovery/schema-discovery.modu
       },
     },
   ],
-  exports: [ConnectionsService],
+  exports: [ConnectionsService, PRISMA_CLIENT],
 })
 export class ConnectionsModule {}

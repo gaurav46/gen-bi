@@ -73,10 +73,11 @@ export function SettingsForm() {
 
   const allFieldsFilled = host && port && database && username && password;
 
-  const [status, setStatus] = useState<'idle' | 'connecting' | 'discovering' | 'ready' | 'error'>('idle');
+  const [status, setStatus] = useState<'idle' | 'connecting' | 'discovering' | 'ready' | 'analyzing' | 'done' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
   const [discoveredSchemas, setDiscoveredSchemas] = useState<string[]>([]);
   const [selectedSchemas, setSelectedSchemas] = useState<string[]>([]);
+  const [analysisMessage, setAnalysisMessage] = useState('');
 
   const handleSchemaToggle = (schema: string, checked: boolean | 'indeterminate') => {
     if (!checked) {
@@ -84,6 +85,70 @@ export function SettingsForm() {
       return;
     }
     setSelectedSchemas((previous) => (previous.includes(schema) ? previous : [...previous, schema]));
+  };
+
+  const handleAnalyze = async () => {
+    const connectionId = localStorage.getItem('connectionId');
+    if (!connectionId || selectedSchemas.length === 0) return;
+
+    setStatus('analyzing');
+    setErrorMessage('');
+    setAnalysisMessage('');
+
+    const analyzePromise = fetch('/api/schema/discover', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ connectionId, schemas: selectedSchemas }),
+    });
+
+    const pollOnce = async (): Promise<boolean> => {
+      try {
+        const statusResponse = await fetch('/api/schema/discover/status');
+        if (!statusResponse.ok) return false;
+        const statusData = await statusResponse.json();
+        setAnalysisMessage(statusData.message || '');
+        if (statusData.status === 'done') {
+          setStatus('done');
+          setAnalysisMessage('Analysis complete');
+          return true;
+        }
+        if (statusData.status === 'error') {
+          setStatus('error');
+          setErrorMessage(statusData.message || 'Analysis failed');
+          return true;
+        }
+        return false;
+      } catch {
+        return false;
+      }
+    };
+
+    const pollInterval = setInterval(async () => {
+      const done = await pollOnce();
+      if (done) clearInterval(pollInterval);
+    }, 500);
+
+    try {
+      const response = await analyzePromise;
+      clearInterval(pollInterval);
+
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({}));
+        setStatus('error');
+        setErrorMessage(
+          typeof errorBody.message === 'string' && errorBody.message.length > 0
+            ? errorBody.message
+            : 'Analysis failed',
+        );
+        return;
+      }
+
+      await pollOnce();
+    } catch {
+      clearInterval(pollInterval);
+      setStatus('error');
+      setErrorMessage('Analysis failed');
+    }
   };
 
   const handleSubmit = async () => {
@@ -184,7 +249,9 @@ export function SettingsForm() {
         </Button>
         {status === 'discovering' && <p className="text-sm">Discovering schemas...</p>}
         {status === 'error' && <p className="text-red-500 text-sm">{errorMessage || 'Connection failed'}</p>}
-        {status === 'ready' && discoveredSchemas.length > 0 && (
+        {status === 'analyzing' && analysisMessage && <p className="text-sm">{analysisMessage}</p>}
+        {status === 'done' && <p className="text-green-600 text-sm">{analysisMessage}</p>}
+        {(status === 'ready' || status === 'analyzing' || status === 'done') && discoveredSchemas.length > 0 && (
           <div className="space-y-3">
             <p className="text-sm">Discovering schemas...</p>
             <p className="text-sm font-medium">Discovered Schemas</p>
@@ -201,8 +268,8 @@ export function SettingsForm() {
                 </div>
               ))}
             </div>
-            <Button disabled={selectedSchemas.length === 0} onClick={() => undefined}>
-              Analyze
+            <Button disabled={selectedSchemas.length === 0 || status === 'analyzing'} onClick={handleAnalyze}>
+              {status === 'analyzing' ? 'Analyzing...' : 'Analyze'}
             </Button>
           </div>
         )}

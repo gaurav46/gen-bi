@@ -19,3 +19,53 @@ model ConnectionConfig {
 
   @@map("connection_configs")
 }
+
+model DiscoveredTable {
+  id           String               @id @default(uuid())
+  connectionId String               @map("connection_id")
+  schemaName   String               @map("schema_name")
+  tableName    String               @map("table_name")
+  createdAt    DateTime             @default(now()) @map("created_at")
+  columns      DiscoveredColumn[]
+  foreignKeys  DiscoveredForeignKey[]
+  indexes      DiscoveredIndex[]
+
+  @@unique([connectionId, schemaName, tableName])
+  @@map("discovered_tables")
+}
+
+model DiscoveredColumn {
+  id              String          @id @default(uuid())
+  tableId         String          @map("table_id")
+  columnName      String          @map("column_name")
+  dataType        String          @map("data_type")
+  isNullable      Boolean         @map("is_nullable")
+  ordinalPosition Int             @map("ordinal_position")
+  table           DiscoveredTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
+
+  @@map("discovered_columns")
+}
+
+model DiscoveredForeignKey {
+  id                 String          @id @default(uuid())
+  tableId            String          @map("table_id")
+  columnName         String          @map("column_name")
+  foreignTableSchema String          @map("foreign_table_schema")
+  foreignTableName   String          @map("foreign_table_name")
+  foreignColumnName  String          @map("foreign_column_name")
+  constraintName     String          @map("constraint_name")
+  table              DiscoveredTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
+
+  @@map("discovered_foreign_keys")
+}
+
+model DiscoveredIndex {
+  id        String          @id @default(uuid())
+  tableId   String          @map("table_id")
+  indexName String          @map("index_name")
+  columnName String         @map("column_name")
+  isUnique  Boolean         @map("is_unique")
+  table     DiscoveredTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
+
+  @@map("discovered_indexes")
+}

@@ -264,6 +264,14 @@ describe('SettingsForm', () => {
       .mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve({ schemas: ['public', 'sales', 'analytics'] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ tablesDiscovered: 3 }),
+      })
+      .mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ status: 'done', current: 3, total: 3, message: 'Analysis complete' }),
       });
     vi.stubGlobal('fetch', fetchSpy);
 
@@ -281,7 +289,7 @@ describe('SettingsForm', () => {
     expect(analyzeButton).toBeEnabled();
 
     await user.click(analyzeButton);
-    await waitFor(() => expect(analyzeButton).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/Analysis complete/i)).toBeInTheDocument());
   });
 
   it('shows error when database has zero non-system schemas', async () => {
@@ -303,6 +311,98 @@ describe('SettingsForm', () => {
     await user.click(screen.getByRole('button', { name: /connect/i }));
 
     expect(await screen.findByText('No non-system schemas found')).toBeInTheDocument();
+  });
+
+  it('clicking Analyze sends POST /api/schema/discover with connectionId and selected schemas', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ id: 'conn-id' }) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ schemas: ['public', 'sales'] }) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ tablesDiscovered: 5 }) })
+      .mockResolvedValue({ ok: true, json: () => Promise.resolve({ status: 'done', current: 5, total: 5, message: 'Analysis complete' }) });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    render(<SettingsForm />);
+    await fillAllFields(user);
+    await user.click(screen.getByRole('button', { name: /connect/i }));
+
+    const publicCheckbox = await screen.findByRole('checkbox', { name: /public/i });
+    await user.click(publicCheckbox);
+    await user.click(screen.getByRole('button', { name: /analyze/i }));
+
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledWith('/api/schema/discover', expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ connectionId: 'conn-id', schemas: ['public'] }),
+      }));
+    });
+  });
+
+  it('shows Analyzing tables progress step with count during analysis', async () => {
+    const user = userEvent.setup();
+    const analyzeDeferred = deferred<{ ok: boolean; json: () => Promise<unknown> }>();
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ id: 'conn-id' }) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ schemas: ['public'] }) })
+      .mockImplementationOnce(() => analyzeDeferred.promise)
+      .mockResolvedValue({ ok: true, json: () => Promise.resolve({ status: 'analyzing', current: 3, total: 12, message: 'Analyzing table 3 of 12' }) });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    render(<SettingsForm />);
+    await fillAllFields(user);
+    await user.click(screen.getByRole('button', { name: /connect/i }));
+
+    const publicCheckbox = await screen.findByRole('checkbox', { name: /public/i });
+    await user.click(publicCheckbox);
+    await user.click(screen.getByRole('button', { name: /analyze/i }));
+
+    expect(await screen.findByText(/Analyzing table 3 of 12/i)).toBeInTheDocument();
+
+    analyzeDeferred.resolve({ ok: true, json: () => Promise.resolve({ tablesDiscovered: 12 }) });
+  });
+
+  it('shows completion message when analysis finishes', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ id: 'conn-id' }) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ schemas: ['public'] }) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ tablesDiscovered: 5 }) })
+      .mockResolvedValue({ ok: true, json: () => Promise.resolve({ status: 'done', current: 5, total: 5, message: 'Analysis complete' }) });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    render(<SettingsForm />);
+    await fillAllFields(user);
+    await user.click(screen.getByRole('button', { name: /connect/i }));
+
+    const publicCheckbox = await screen.findByRole('checkbox', { name: /public/i });
+    await user.click(publicCheckbox);
+    await user.click(screen.getByRole('button', { name: /analyze/i }));
+
+    expect(await screen.findByText(/Analysis complete/i)).toBeInTheDocument();
+  });
+
+  it('shows error message when analysis fails', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ id: 'conn-id' }) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ schemas: ['public'] }) })
+      .mockResolvedValueOnce({ ok: false, json: () => Promise.resolve({ message: 'No tables found in selected schemas' }) });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    render(<SettingsForm />);
+    await fillAllFields(user);
+    await user.click(screen.getByRole('button', { name: /connect/i }));
+
+    const publicCheckbox = await screen.findByRole('checkbox', { name: /public/i });
+    await user.click(publicCheckbox);
+    await user.click(screen.getByRole('button', { name: /analyze/i }));
+
+    expect(await screen.findByText(/No tables found in selected schemas/i)).toBeInTheDocument();
   });
 
   it('Analyze button is disabled when no schemas are selected', async () => {

@@ -54,12 +54,12 @@ User clicks Connect, app connects to the tenant DB read-only, discovers availabl
 
 For selected schemas, discover all tables, columns, types, foreign keys, and indexes. Store in Supabase.
 
-- [ ] Discovers tables, columns, data types, foreign keys, and indexes for selected schemas
-- [ ] Shows "Analyzing tables..." progress step with count (e.g., "Analyzing table 3 of 12")
-- [ ] Stores discovered schema metadata (tables, columns, types, FKs, indexes) in Supabase
-- [ ] Supabase migration creates tables for schema metadata storage
-- [ ] Shows an error when a selected schema contains zero tables
-- [ ] Analysis can handle databases with 100+ tables without timeout
+- [x] Discovers tables, columns, data types, foreign keys, and indexes for selected schemas
+- [x] Shows "Analyzing tables..." progress step with count (e.g., "Analyzing table 3 of 12")
+- [x] Stores discovered schema metadata (tables, columns, types, FKs, indexes) in Supabase
+- [x] Supabase migration creates tables for schema metadata storage
+- [x] Shows an error when a selected schema contains zero tables
+- [x] Analysis can handle databases with 100+ tables without timeout
 
 ## Slice 4: Embedding Generation
 

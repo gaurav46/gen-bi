@@ -34,12 +34,12 @@ export class TenantDatabaseAdapter implements TenantDatabasePort {
     }
   }
 
-  async query(sql: string): Promise<QueryResult> {
+  async query(sql: string, params?: unknown[]): Promise<QueryResult> {
     if (!this.client) {
       throw new Error('Tenant database client is not connected');
     }
 
-    const result = await this.client.query(sql);
+    const result = params ? await this.client.query(sql, params) : await this.client.query(sql);
     return { rows: result.rows as Record<string, unknown>[] };
   }
 
