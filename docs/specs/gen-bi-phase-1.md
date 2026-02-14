@@ -18,7 +18,7 @@ User connects a PostgreSQL database via a Settings screen, selects schemas to an
 | **Tenant DB access** | libpq (read-only) |
 | **Internal DB** | PostgreSQL (cloud-agnostic — AWS, Azure, on-prem) |
 | **ORM / Migrations** | Prisma |
-| **Embeddings** | Voyage AI (generation) + pgvector (storage + search) |
+| **Embeddings** | OpenAI text-embedding-3-small (generation) + pgvector (storage + search) |
 
 
 ## Slice 1: Project Scaffold + Settings Form
@@ -63,15 +63,15 @@ For selected schemas, discover all tables, columns, types, foreign keys, and ind
 
 ## Slice 4: Embedding Generation
 
-Generate column-level embeddings via Voyage AI, store in Supabase pgvector for later RAG retrieval.
+Generate column-level embeddings via OpenAI, store in internal PostgreSQL using pgvector for later RAG retrieval.
 
-- [ ] Generates an embedding for each column using Voyage AI (input: table name + column name + data type)
-- [ ] Shows "Generating embeddings..." progress step
-- [ ] Stores embeddings in Supabase using pgvector
-- [ ] Supabase migration creates a table with a vector column for embeddings
-- [ ] Shows "Done" when all steps complete successfully
-- [ ] Shows an error if Voyage AI is unreachable or returns an error
-- [ ] Re-running analysis on the same database replaces previous embeddings (not duplicates)
+- [x] Generates an embedding for each column using OpenAI text-embedding-3-small (input: table name + column name + data type)
+- [x] Shows "Generating embeddings..." progress step
+- [x] Stores embeddings in internal PostgreSQL using pgvector
+- [x] Prisma migration creates a table with a vector column for embeddings
+- [x] Shows "Done" when all steps complete successfully
+- [x] Shows an error if OpenAI is unreachable or returns an error
+- [x] Re-running analysis on the same database replaces previous embeddings (not duplicates)
 
 ## Slice 5: Schema Explorer UI
 

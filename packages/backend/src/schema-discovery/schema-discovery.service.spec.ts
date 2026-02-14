@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NotFoundException } from '@nestjs/common';
 import { SchemaDiscoveryService } from './schema-discovery.service';
 import type { TenantDatabasePort } from './tenant-database.port';
+import type { EmbeddingPort } from './embedding.port';
 import { ConnectionsService } from '../connections/connections.service';
 
 const defaultConfig = {
@@ -20,6 +21,7 @@ describe('SchemaDiscoveryService', () => {
   let connectionsService: Pick<ConnectionsService, 'findOne'>;
   let tenantDatabasePort: TenantDatabasePort;
   let mockPrisma: Record<string, any>;
+  let mockEmbeddingPort: EmbeddingPort;
 
   beforeEach(() => {
     connectionsService = {
@@ -38,12 +40,20 @@ describe('SchemaDiscoveryService', () => {
         create: vi.fn().mockResolvedValue({}),
         findMany: vi.fn().mockResolvedValue([]),
       },
+      $executeRaw: vi.fn().mockResolvedValue(undefined),
+    };
+
+    mockEmbeddingPort = {
+      generateEmbeddings: vi.fn().mockImplementation(async (inputs: string[]) =>
+        inputs.map(() => [0.0, 0.0]),
+      ),
     };
 
     service = new SchemaDiscoveryService(
       connectionsService as ConnectionsService,
       tenantDatabasePort,
       mockPrisma,
+      mockEmbeddingPort,
     );
   });
 
@@ -409,6 +419,114 @@ describe('SchemaDiscoveryService', () => {
     );
     expect(tablesCall![0]).not.toContain("DROP TABLE");
     expect(tablesCall![1]).toContain("'; DROP TABLE users; --");
+  });
+
+  it('analyzeSchemas generates embeddings for discovered columns after metadata persistence', async () => {
+    vi.mocked(connectionsService.findOne).mockResolvedValue(defaultConfig);
+    vi.mocked(tenantDatabasePort.query).mockImplementation(async (sql: string) => {
+      if (sql.includes('information_schema.tables')) {
+        return { rows: [{ table_schema: 'public', table_name: 'users' }] };
+      }
+      if (sql.includes('information_schema.columns')) {
+        return { rows: [
+          { table_schema: 'public', table_name: 'users', column_name: 'id', data_type: 'uuid', is_nullable: 'NO', ordinal_position: 1 },
+          { table_schema: 'public', table_name: 'users', column_name: 'email', data_type: 'varchar', is_nullable: 'YES', ordinal_position: 2 },
+        ]};
+      }
+      return { rows: [] };
+    });
+    vi.mocked(mockEmbeddingPort.generateEmbeddings).mockResolvedValue([[0.1, 0.2], [0.3, 0.4]]);
+
+    await service.analyzeSchemas('conn-id', ['public']);
+
+    expect(mockEmbeddingPort.generateEmbeddings).toHaveBeenCalledWith([
+      'users.id uuid',
+      'users.email varchar',
+    ]);
+    expect(mockPrisma.$executeRaw).toHaveBeenCalled();
+  });
+
+  it('analyzeSchemas updates progress to Generating embeddings during embedding step', async () => {
+    vi.mocked(connectionsService.findOne).mockResolvedValue(defaultConfig);
+    const progressMessages: string[] = [];
+    vi.mocked(tenantDatabasePort.query).mockImplementation(async (sql: string) => {
+      if (sql.includes('information_schema.tables')) {
+        return { rows: [{ table_schema: 'public', table_name: 'users' }] };
+      }
+      if (sql.includes('information_schema.columns')) {
+        return { rows: [
+          { table_schema: 'public', table_name: 'users', column_name: 'id', data_type: 'uuid', is_nullable: 'NO', ordinal_position: 1 },
+        ]};
+      }
+      return { rows: [] };
+    });
+    vi.mocked(mockEmbeddingPort.generateEmbeddings).mockImplementation(async () => {
+      progressMessages.push(service.getDiscoveryStatus().message);
+      return [[0.1, 0.2]];
+    });
+
+    await service.analyzeSchemas('conn-id', ['public']);
+
+    expect(progressMessages.some((m) => m.includes('Generating embeddings'))).toBe(true);
+  });
+
+  it('analyzeSchemas deletes existing embeddings for connectionId before storing new ones', async () => {
+    vi.mocked(connectionsService.findOne).mockResolvedValue(defaultConfig);
+    vi.mocked(tenantDatabasePort.query).mockImplementation(async (sql: string) => {
+      if (sql.includes('information_schema.tables')) {
+        return { rows: [{ table_schema: 'public', table_name: 'users' }] };
+      }
+      if (sql.includes('information_schema.columns')) {
+        return { rows: [
+          { table_schema: 'public', table_name: 'users', column_name: 'id', data_type: 'uuid', is_nullable: 'NO', ordinal_position: 1 },
+        ]};
+      }
+      return { rows: [] };
+    });
+    vi.mocked(mockEmbeddingPort.generateEmbeddings).mockResolvedValue([[0.1, 0.2]]);
+
+    await service.analyzeSchemas('conn-id', ['public']);
+
+    const executeRawCalls = mockPrisma.$executeRaw.mock.calls;
+    const deleteCall = executeRawCalls.find((call: any[]) => {
+      const sql = String(call[0]?.strings?.[0] ?? call[0] ?? '');
+      return sql.includes('DELETE');
+    });
+    expect(deleteCall).toBeDefined();
+  });
+
+  it('analyzeSchemas reports error when embedding generation fails but metadata is preserved', async () => {
+    vi.mocked(connectionsService.findOne).mockResolvedValue(defaultConfig);
+    vi.mocked(tenantDatabasePort.query).mockImplementation(async (sql: string) => {
+      if (sql.includes('information_schema.tables')) {
+        return { rows: [{ table_schema: 'public', table_name: 'users' }] };
+      }
+      if (sql.includes('information_schema.columns')) {
+        return { rows: [
+          { table_schema: 'public', table_name: 'users', column_name: 'id', data_type: 'uuid', is_nullable: 'NO', ordinal_position: 1 },
+        ]};
+      }
+      return { rows: [] };
+    });
+    vi.mocked(mockEmbeddingPort.generateEmbeddings).mockRejectedValue(new Error('OpenAI API unreachable'));
+
+    await expect(service.analyzeSchemas('conn-id', ['public'])).rejects.toThrow('OpenAI API unreachable');
+
+    expect(mockPrisma.discoveredTable.create).toHaveBeenCalled();
+  });
+
+  it('analyzeSchemas skips embedding generation when no columns are discovered', async () => {
+    vi.mocked(connectionsService.findOne).mockResolvedValue(defaultConfig);
+    vi.mocked(tenantDatabasePort.query).mockImplementation(async (sql: string) => {
+      if (sql.includes('information_schema.tables')) {
+        return { rows: [{ table_schema: 'public', table_name: 'empty_table' }] };
+      }
+      return { rows: [] };
+    });
+
+    await service.analyzeSchemas('conn-id', ['public']);
+
+    expect(mockEmbeddingPort.generateEmbeddings).not.toHaveBeenCalled();
   });
 
   it('second analyzeSchemas call while one is running rejects', async () => {

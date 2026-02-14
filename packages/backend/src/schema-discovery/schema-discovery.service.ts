@@ -1,6 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ConnectionsService, PRISMA_CLIENT } from '../connections/connections.service';
 import type { TenantDatabasePort } from './tenant-database.port';
+import type { EmbeddingPort } from './embedding.port';
+import { EMBEDDING_PORT } from './embedding.port';
+import { buildEmbeddingInputs } from './embedding-input';
 
 export const TENANT_DATABASE_PORT = 'TENANT_DATABASE_PORT';
 const SYSTEM_SCHEMA_NAMES = new Set(['information_schema', 'pg_catalog', 'pg_toast']);
@@ -13,6 +16,7 @@ export class SchemaDiscoveryService {
     private readonly connectionsService: ConnectionsService,
     @Inject(TENANT_DATABASE_PORT) private readonly tenantDatabasePort: TenantDatabasePort,
     @Inject(PRISMA_CLIENT) private readonly prisma: any,
+    @Inject(EMBEDDING_PORT) private readonly embeddingPort: EmbeddingPort,
   ) {}
 
   getDiscoveryStatus() {
@@ -130,6 +134,26 @@ export class SchemaDiscoveryService {
             },
           },
         });
+      }
+
+      const allColumns = columnsResult.rows.map((c) => ({
+        tableName: c.table_name as string,
+        columnName: c.column_name as string,
+        dataType: c.data_type as string,
+      }));
+
+      if (allColumns.length > 0) {
+        this.progress = { status: 'analyzing', current, total: tablesResult.rows.length, message: 'Generating embeddings...' };
+
+        const inputs = buildEmbeddingInputs(allColumns);
+        const embeddings = await this.embeddingPort.generateEmbeddings(inputs);
+
+        await this.prisma.$executeRaw`DELETE FROM column_embeddings WHERE connection_id = ${connectionId}`;
+
+        for (let i = 0; i < allColumns.length; i++) {
+          const vectorStr = `[${embeddings[i].join(',')}]`;
+          await this.prisma.$executeRaw`INSERT INTO column_embeddings (id, connection_id, table_id, column_id, input_text, embedding, created_at) VALUES (gen_random_uuid(), ${connectionId}, ${allColumns[i].tableName}, ${allColumns[i].columnName}, ${inputs[i]}, ${vectorStr}::vector, now())`;
+        }
       }
 
       this.progress = { status: 'done', current, total: tablesResult.rows.length, message: 'Analysis complete' };

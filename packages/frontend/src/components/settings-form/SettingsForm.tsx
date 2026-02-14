@@ -206,31 +206,31 @@ export function SettingsForm() {
   };
 
   return (
-    <div className="max-w-md mx-auto p-6">
-      <h1 className="text-2xl font-bold mb-6">Settings</h1>
-      <div className="space-y-4">
-        <div>
-          <Label htmlFor="host">Host</Label>
+    <div className="max-w-md mx-auto p-4">
+      <h1 className="text-lg font-semibold mb-4">Settings</h1>
+      <div className="space-y-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="host" className="text-sm font-medium">Host</Label>
           <Input id="host" value={host} onChange={handleFieldChange(setHost, 'host')} />
         </div>
-        <div>
-          <Label htmlFor="port">Port</Label>
+        <div className="space-y-1.5">
+          <Label htmlFor="port" className="text-sm font-medium">Port</Label>
           <Input id="port" value={port} onChange={handleFieldChange(setPort, 'port')} />
         </div>
-        <div>
-          <Label htmlFor="database">Database</Label>
+        <div className="space-y-1.5">
+          <Label htmlFor="database" className="text-sm font-medium">Database</Label>
           <Input id="database" value={database} onChange={handleFieldChange(setDatabase, 'database')} />
         </div>
-        <div>
-          <Label htmlFor="username">Username</Label>
+        <div className="space-y-1.5">
+          <Label htmlFor="username" className="text-sm font-medium">Username</Label>
           <Input id="username" value={username} onChange={handleFieldChange(setUsername, 'username')} />
         </div>
-        <div>
-          <Label htmlFor="password">Password</Label>
+        <div className="space-y-1.5">
+          <Label htmlFor="password" className="text-sm font-medium">Password</Label>
           <Input id="password" type="password" value={password} onChange={handleFieldChange(setPassword, 'password')} />
         </div>
-        <div>
-          <Label htmlFor="connection-string">Connection String</Label>
+        <div className="space-y-1.5">
+          <Label htmlFor="connection-string" className="text-sm font-medium">Connection String</Label>
           <Input
             id="connection-string"
             value={connectionString}
@@ -248,16 +248,16 @@ export function SettingsForm() {
                 : 'Connect'}
         </Button>
         {status === 'discovering' && <p className="text-sm">Discovering schemas...</p>}
-        {status === 'error' && <p className="text-red-500 text-sm">{errorMessage || 'Connection failed'}</p>}
-        {status === 'analyzing' && analysisMessage && <p className="text-sm">{analysisMessage}</p>}
-        {status === 'done' && <p className="text-green-600 text-sm">{analysisMessage}</p>}
+        {status === 'error' && <p className="text-destructive text-sm">{errorMessage || 'Connection failed'}</p>}
+        {status === 'analyzing' && analysisMessage && <p className="text-sm text-muted-foreground">{analysisMessage}</p>}
+        {status === 'done' && <p className="text-success text-sm">{analysisMessage}</p>}
         {(status === 'ready' || status === 'analyzing' || status === 'done') && discoveredSchemas.length > 0 && (
-          <div className="space-y-3">
-            <p className="text-sm">Discovering schemas...</p>
-            <p className="text-sm font-medium">Discovered Schemas</p>
-            <div className="space-y-2">
+          <div className="space-y-2">
+            <p className="text-sm text-muted-foreground">Discovering schemas...</p>
+            <p className="text-sm font-semibold">Discovered Schemas</p>
+            <div className="space-y-1.5">
               {discoveredSchemas.map((schema) => (
-                <div key={schema} className="flex items-center gap-2">
+                <div key={schema} className="flex items-center gap-1.5">
                   <Checkbox
                     id={`schema-${schema}`}
                     aria-label={schema}

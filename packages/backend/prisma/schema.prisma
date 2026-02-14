@@ -69,3 +69,16 @@ model DiscoveredIndex {
 
   @@map("discovered_indexes")
 }
+
+model ColumnEmbedding {
+  id           String                    @id @default(uuid())
+  connectionId String                    @map("connection_id")
+  tableId      String                    @map("table_id")
+  columnId     String                    @map("column_id")
+  inputText    String                    @map("input_text")
+  embedding    Unsupported("vector(1536)")
+  createdAt    DateTime                  @default(now()) @map("created_at")
+
+  @@unique([connectionId, tableId, columnId])
+  @@map("column_embeddings")
+}
