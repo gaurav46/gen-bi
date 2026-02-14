@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SettingsForm } from './SettingsForm';
@@ -10,7 +10,27 @@ async function fillAllFields(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText(/password/i), 'secret');
 }
 
+function deferred<T>() {
+  let resolve: (value: T) => void;
+  let reject: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve: resolve!, reject: reject! };
+}
+
 describe('SettingsForm', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.unstubAllGlobals();
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+    vi.unstubAllGlobals();
+  });
+
   it('renders Settings heading', () => {
     render(<SettingsForm />);
     expect(screen.getByRole('heading', { name: /settings/i })).toBeInTheDocument();
@@ -132,5 +152,186 @@ describe('SettingsForm', () => {
 
     localStorage.removeItem('connectionId');
     vi.unstubAllGlobals();
+  });
+
+  it('shows Connecting progress step when testing connection', async () => {
+    const user = userEvent.setup();
+    const testRequest = deferred<{ ok: boolean; json: () => Promise<{ schemas: string[] }> }>();
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ id: 'conn-id' }),
+      })
+      .mockImplementationOnce(() => testRequest.promise);
+    vi.stubGlobal('fetch', fetchSpy);
+
+    render(<SettingsForm />);
+    await fillAllFields(user);
+    await user.click(screen.getByRole('button', { name: /connect/i }));
+
+    expect(screen.getByRole('button', { name: /connecting/i })).toBeInTheDocument();
+
+    testRequest.resolve({
+      ok: true,
+      json: () => Promise.resolve({ schemas: ['public'] }),
+    });
+    await screen.findByRole('button', { name: /connected/i });
+  });
+
+  it('shows Discovering schemas progress step then displays schema list', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ id: 'conn-id' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ schemas: ['public', 'sales'] }),
+      });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    render(<SettingsForm />);
+    await fillAllFields(user);
+    await user.click(screen.getByRole('button', { name: /connect/i }));
+
+    expect(await screen.findByText('Discovering schemas...')).toBeInTheDocument();
+    expect(await screen.findByRole('checkbox', { name: /public/i })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /sales/i })).toBeInTheDocument();
+  });
+
+  it('shows error message when connection test fails', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ id: 'conn-id' }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        json: () => Promise.resolve({ message: 'Connection failed: invalid credentials' }),
+      });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    render(<SettingsForm />);
+    await fillAllFields(user);
+    await user.click(screen.getByRole('button', { name: /connect/i }));
+
+    expect(await screen.findByText('Connection failed: invalid credentials')).toBeInTheDocument();
+  });
+
+  it('renders checkboxes for each discovered schema', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ id: 'conn-id' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ schemas: ['public', 'sales', 'analytics'] }),
+      });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    render(<SettingsForm />);
+    await fillAllFields(user);
+    await user.click(screen.getByRole('button', { name: /connect/i }));
+
+    const publicCheckbox = await screen.findByRole('checkbox', { name: /public/i });
+    const salesCheckbox = screen.getByRole('checkbox', { name: /sales/i });
+    const analyticsCheckbox = screen.getByRole('checkbox', { name: /analytics/i });
+
+    expect(publicCheckbox).toBeInTheDocument();
+    expect(salesCheckbox).toBeInTheDocument();
+    expect(analyticsCheckbox).toBeInTheDocument();
+    expect(publicCheckbox).not.toBeChecked();
+    expect(salesCheckbox).not.toBeChecked();
+    expect(analyticsCheckbox).not.toBeChecked();
+  });
+
+  it('user can select schemas and click Analyze', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ id: 'conn-id' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ schemas: ['public', 'sales', 'analytics'] }),
+      });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    render(<SettingsForm />);
+    await fillAllFields(user);
+    await user.click(screen.getByRole('button', { name: /connect/i }));
+
+    const publicCheckbox = await screen.findByRole('checkbox', { name: /public/i });
+    const analyticsCheckbox = screen.getByRole('checkbox', { name: /analytics/i });
+
+    await user.click(publicCheckbox);
+    await user.click(analyticsCheckbox);
+
+    const analyzeButton = screen.getByRole('button', { name: /analyze/i });
+    expect(analyzeButton).toBeEnabled();
+
+    await user.click(analyzeButton);
+    await waitFor(() => expect(analyzeButton).toBeInTheDocument());
+  });
+
+  it('shows error when database has zero non-system schemas', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ id: 'conn-id' }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        json: () => Promise.resolve({ message: 'No non-system schemas found' }),
+      });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    render(<SettingsForm />);
+    await fillAllFields(user);
+    await user.click(screen.getByRole('button', { name: /connect/i }));
+
+    expect(await screen.findByText('No non-system schemas found')).toBeInTheDocument();
+  });
+
+  it('Analyze button is disabled when no schemas are selected', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ id: 'conn-id' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ schemas: ['public'] }),
+      });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    render(<SettingsForm />);
+    await fillAllFields(user);
+    await user.click(screen.getByRole('button', { name: /connect/i }));
+
+    const publicCheckbox = await screen.findByRole('checkbox', { name: /public/i });
+    const analyzeButton = screen.getByRole('button', { name: /analyze/i });
+
+    expect(analyzeButton).toBeDisabled();
+
+    await user.click(publicCheckbox);
+    expect(analyzeButton).toBeEnabled();
+
+    await user.click(publicCheckbox);
+    expect(analyzeButton).toBeDisabled();
   });
 });

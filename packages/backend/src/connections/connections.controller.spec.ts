@@ -2,10 +2,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConnectionsController } from './connections.controller';
 import { ConnectionsService } from './connections.service';
+import { SchemaDiscoveryService } from '../schema-discovery/schema-discovery.service';
 
 const mockService = {
   create: vi.fn(),
   findOne: vi.fn(),
+};
+
+const mockSchemaDiscoveryService = {
+  testConnection: vi.fn(),
 };
 
 describe('ConnectionsController', () => {
@@ -15,7 +20,10 @@ describe('ConnectionsController', () => {
     vi.clearAllMocks();
     const module: TestingModule = await Test.createTestingModule({
       controllers: [ConnectionsController],
-      providers: [{ provide: ConnectionsService, useValue: mockService }],
+      providers: [
+        { provide: ConnectionsService, useValue: mockService },
+        { provide: SchemaDiscoveryService, useValue: mockSchemaDiscoveryService },
+      ],
     }).compile();
 
     controller = module.get<ConnectionsController>(ConnectionsController);

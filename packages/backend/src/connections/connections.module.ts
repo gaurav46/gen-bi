@@ -1,10 +1,12 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '../../generated/prisma/client';
 import { ConnectionsController } from './connections.controller';
 import { ConnectionsService, PRISMA_CLIENT } from './connections.service';
+import { SchemaDiscoveryModule } from '../schema-discovery/schema-discovery.module';
 
 @Module({
+  imports: [forwardRef(() => SchemaDiscoveryModule)],
   controllers: [ConnectionsController],
   providers: [
     ConnectionsService,

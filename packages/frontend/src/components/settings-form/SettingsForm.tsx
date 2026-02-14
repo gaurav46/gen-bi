@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { buildConnectionString, parseConnectionString } from './useConnectionString';
 
 export function SettingsForm() {
@@ -72,12 +73,27 @@ export function SettingsForm() {
 
   const allFieldsFilled = host && port && database && username && password;
 
-  const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [status, setStatus] = useState<'idle' | 'connecting' | 'discovering' | 'ready' | 'error'>('idle');
+  const [errorMessage, setErrorMessage] = useState('');
+  const [discoveredSchemas, setDiscoveredSchemas] = useState<string[]>([]);
+  const [selectedSchemas, setSelectedSchemas] = useState<string[]>([]);
+
+  const handleSchemaToggle = (schema: string, checked: boolean | 'indeterminate') => {
+    if (!checked) {
+      setSelectedSchemas((previous) => previous.filter((item) => item !== schema));
+      return;
+    }
+    setSelectedSchemas((previous) => (previous.includes(schema) ? previous : [...previous, schema]));
+  };
 
   const handleSubmit = async () => {
-    setStatus('saving');
+    setStatus('connecting');
+    setErrorMessage('');
+    setDiscoveredSchemas([]);
+    setSelectedSchemas([]);
+
     try {
-      const response = await fetch('/api/connections', {
+      const saveResponse = await fetch('/api/connections', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -88,15 +104,39 @@ export function SettingsForm() {
           password,
         }),
       });
-      if (response.ok) {
-        const saved = await response.json();
-        localStorage.setItem('connectionId', saved.id);
-        setStatus('saved');
-      } else {
+
+      if (!saveResponse.ok) {
         setStatus('error');
+        setErrorMessage('Failed to save connection.');
+        return;
       }
+
+      const saved = await saveResponse.json();
+      localStorage.setItem('connectionId', saved.id);
+
+      const testResponse = await fetch(`/api/connections/${saved.id}/test`, {
+        method: 'POST',
+      });
+
+      if (!testResponse.ok) {
+        const errorBody = await testResponse.json().catch(() => ({}));
+        setStatus('error');
+        setErrorMessage(
+          typeof errorBody.message === 'string' && errorBody.message.length > 0
+            ? errorBody.message
+            : 'Connection failed'
+        );
+        return;
+      }
+
+      const testResult = await testResponse.json();
+      setStatus('discovering');
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      setDiscoveredSchemas(Array.isArray(testResult.schemas) ? testResult.schemas : []);
+      setStatus('ready');
     } catch {
       setStatus('error');
+      setErrorMessage('Connection failed');
     }
   };
 
@@ -133,10 +173,39 @@ export function SettingsForm() {
             onBlur={handleConnectionStringBlur}
           />
         </div>
-        <Button disabled={!allFieldsFilled || status === 'saving'} onClick={handleSubmit}>
-          {status === 'saving' ? 'Connecting...' : status === 'saved' ? 'Connected' : 'Connect'}
+        <Button disabled={!allFieldsFilled || status === 'connecting' || status === 'discovering'} onClick={handleSubmit}>
+          {status === 'connecting'
+            ? 'Connecting...'
+            : status === 'discovering'
+              ? 'Discovering schemas...'
+              : status === 'ready'
+                ? 'Connected'
+                : 'Connect'}
         </Button>
-        {status === 'error' && <p className="text-red-500 text-sm">Failed to save connection.</p>}
+        {status === 'discovering' && <p className="text-sm">Discovering schemas...</p>}
+        {status === 'error' && <p className="text-red-500 text-sm">{errorMessage || 'Connection failed'}</p>}
+        {status === 'ready' && discoveredSchemas.length > 0 && (
+          <div className="space-y-3">
+            <p className="text-sm">Discovering schemas...</p>
+            <p className="text-sm font-medium">Discovered Schemas</p>
+            <div className="space-y-2">
+              {discoveredSchemas.map((schema) => (
+                <div key={schema} className="flex items-center gap-2">
+                  <Checkbox
+                    id={`schema-${schema}`}
+                    aria-label={schema}
+                    checked={selectedSchemas.includes(schema)}
+                    onCheckedChange={(checked) => handleSchemaToggle(schema, checked)}
+                  />
+                  <Label htmlFor={`schema-${schema}`}>{schema}</Label>
+                </div>
+              ))}
+            </div>
+            <Button disabled={selectedSchemas.length === 0} onClick={() => undefined}>
+              Analyze
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );
