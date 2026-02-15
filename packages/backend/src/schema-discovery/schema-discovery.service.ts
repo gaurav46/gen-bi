@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConnectionsService, PRISMA_CLIENT } from '../connections/connections.service';
 import type { TenantDatabasePort } from './tenant-database.port';
 import type { EmbeddingPort } from './embedding.port';
@@ -10,6 +10,7 @@ const SYSTEM_SCHEMA_NAMES = new Set(['information_schema', 'pg_catalog', 'pg_toa
 
 @Injectable()
 export class SchemaDiscoveryService {
+  private readonly logger = new Logger(SchemaDiscoveryService.name);
   private progress = { status: 'idle' as string, current: 0, total: 0, message: '' };
 
   constructor(
@@ -36,6 +37,7 @@ export class SchemaDiscoveryService {
     }
 
     this.progress = { status: 'analyzing', current: 0, total: 0, message: 'Starting analysis...' };
+    this.logger.log(`Starting schema analysis for connection ${connectionId}, schemas: ${schemas.join(', ')}`);
 
     const config = await this.connectionsService.findOne(connectionId);
 
@@ -72,7 +74,7 @@ export class SchemaDiscoveryService {
       );
 
       const indexResult = await this.tenantDatabasePort.query(
-        `SELECT schemaname, tablename, indexname, indexdef FROM pg_indexes WHERE schemaname IN (${placeholders})`,
+        `SELECT n.nspname AS schemaname, t.relname AS tablename, i.relname AS indexname, a.attname AS columnname, ix.indisunique AS is_unique FROM pg_index ix JOIN pg_class t ON t.oid = ix.indrelid JOIN pg_class i ON i.oid = ix.indexrelid JOIN pg_namespace n ON n.oid = t.relnamespace JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(ix.indkey) WHERE n.nspname IN (${placeholders})`,
         schemas,
       );
 
@@ -128,8 +130,8 @@ export class SchemaDiscoveryService {
             indexes: {
               create: tableIndexes.map((idx) => ({
                 indexName: idx.indexname as string,
-                columnName: idx.tablename as string,
-                isUnique: (idx.indexdef as string)?.includes('UNIQUE') ?? false,
+                columnName: idx.columnname as string,
+                isUnique: Boolean(idx.is_unique),
               })),
             },
           },
@@ -157,8 +159,10 @@ export class SchemaDiscoveryService {
       }
 
       this.progress = { status: 'done', current, total: tablesResult.rows.length, message: 'Analysis complete' };
+      this.logger.log(`Schema analysis complete for connection ${connectionId}: ${tablesResult.rows.length} tables discovered`);
       return { tablesDiscovered: tablesResult.rows.length };
     } catch (error) {
+      this.logger.error(`Schema analysis failed for connection ${connectionId}: ${error}`);
       this.progress = { status: 'error', current: 0, total: 0, message: String(error) };
       throw error;
     } finally {

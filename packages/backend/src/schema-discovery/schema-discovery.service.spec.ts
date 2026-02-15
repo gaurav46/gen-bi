@@ -273,15 +273,15 @@ describe('SchemaDiscoveryService', () => {
     );
   });
 
-  it('analyzeSchemas discovers indexes via pg_indexes', async () => {
+  it('analyzeSchemas discovers indexes with correct column names', async () => {
     vi.mocked(connectionsService.findOne).mockResolvedValue(defaultConfig);
     vi.mocked(tenantDatabasePort.query).mockImplementation(async (sql: string) => {
       if (sql.includes('information_schema.tables')) {
         return { rows: [{ table_schema: 'public', table_name: 'users' }] };
       }
-      if (sql.includes('pg_indexes')) {
+      if (sql.includes('pg_index')) {
         return { rows: [
-          { schemaname: 'public', tablename: 'users', indexname: 'users_pkey', indexdef: 'CREATE UNIQUE INDEX users_pkey ON public.users USING btree (id)' },
+          { schemaname: 'public', tablename: 'users', indexname: 'users_pkey', columnname: 'id', is_unique: true },
         ]};
       }
       return { rows: [] };
@@ -290,7 +290,7 @@ describe('SchemaDiscoveryService', () => {
     await service.analyzeSchemas('conn-id', ['public']);
 
     expect(tenantDatabasePort.query).toHaveBeenCalledWith(
-      expect.stringContaining('pg_indexes'),
+      expect.stringContaining('pg_index'),
       expect.arrayContaining(['public']),
     );
     expect(mockPrisma.discoveredTable.create).toHaveBeenCalledWith(
@@ -298,6 +298,7 @@ describe('SchemaDiscoveryService', () => {
         data: expect.objectContaining({
           indexes: { create: [expect.objectContaining({
             indexName: 'users_pkey',
+            columnName: 'id',
             isUnique: true,
           })]},
         }),

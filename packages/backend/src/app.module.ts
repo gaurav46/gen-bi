@@ -2,9 +2,10 @@ import { Module } from '@nestjs/common';
 import { HealthController } from './health/health.controller';
 import { ConnectionsModule } from './connections/connections.module';
 import { SchemaDiscoveryModule } from './schema-discovery/schema-discovery.module';
+import { QueryModule } from './query/query.module';
 
 @Module({
-  imports: [ConnectionsModule, SchemaDiscoveryModule],
+  imports: [ConnectionsModule, SchemaDiscoveryModule, QueryModule],
   controllers: [HealthController],
 })
 export class AppModule {}

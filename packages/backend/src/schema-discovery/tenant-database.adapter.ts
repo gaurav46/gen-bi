@@ -1,12 +1,14 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Client } from 'pg';
 import type { QueryResult, TenantConnectionConfig, TenantDatabasePort } from './tenant-database.port';
 
 @Injectable()
 export class TenantDatabaseAdapter implements TenantDatabasePort {
+  private readonly logger = new Logger(TenantDatabaseAdapter.name);
   private client: Client | null = null;
 
   async connect(config: TenantConnectionConfig): Promise<void> {
+    this.logger.log(`Connecting to tenant database at ${config.host}:${config.port}/${config.database}`);
     this.client = new Client({
       host: config.host,
       port: config.port,

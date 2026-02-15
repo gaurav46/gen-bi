@@ -22,6 +22,6 @@ import { SchemaController } from './schema.controller';
       useExisting: OpenAIEmbeddingAdapter,
     },
   ],
-  exports: [SchemaDiscoveryService],
+  exports: [SchemaDiscoveryService, EMBEDDING_PORT, TENANT_DATABASE_PORT],
 })
 export class SchemaDiscoveryModule {}

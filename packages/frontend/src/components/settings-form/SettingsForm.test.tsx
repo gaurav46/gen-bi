@@ -154,17 +154,10 @@ describe('SettingsForm', () => {
     vi.unstubAllGlobals();
   });
 
-  it('shows Connecting progress step when testing connection', async () => {
+  it('shows Connecting progress step when saving connection', async () => {
     const user = userEvent.setup();
-    const testRequest = deferred<{ ok: boolean; json: () => Promise<{ schemas: string[] }> }>();
-    const fetchSpy = vi
-      .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ id: 'conn-id' }),
-      })
-      .mockImplementationOnce(() => testRequest.promise);
-    vi.stubGlobal('fetch', fetchSpy);
+    const saveRequest = deferred<{ ok: boolean; json: () => Promise<unknown> }>();
+    vi.stubGlobal('fetch', vi.fn().mockImplementationOnce(() => saveRequest.promise));
 
     render(<SettingsForm />);
     await fillAllFields(user);
@@ -172,25 +165,23 @@ describe('SettingsForm', () => {
 
     expect(screen.getByRole('button', { name: /connecting/i })).toBeInTheDocument();
 
-    testRequest.resolve({
+    saveRequest.resolve({
       ok: true,
-      json: () => Promise.resolve({ schemas: ['public'] }),
+      json: () => Promise.resolve({ id: 'conn-id' }),
     });
     await screen.findByRole('button', { name: /connected/i });
   });
 
   it('shows Discovering schemas progress step then displays schema list', async () => {
     const user = userEvent.setup();
+    const testDeferred = deferred<{ ok: boolean; json: () => Promise<unknown> }>();
     const fetchSpy = vi
       .fn()
       .mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve({ id: 'conn-id' }),
       })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ schemas: ['public', 'sales'] }),
-      });
+      .mockImplementationOnce(() => testDeferred.promise);
     vi.stubGlobal('fetch', fetchSpy);
 
     render(<SettingsForm />);
@@ -198,6 +189,12 @@ describe('SettingsForm', () => {
     await user.click(screen.getByRole('button', { name: /connect/i }));
 
     expect(await screen.findByText('Discovering schemas...')).toBeInTheDocument();
+
+    testDeferred.resolve({
+      ok: true,
+      json: () => Promise.resolve({ schemas: ['public', 'sales'] }),
+    });
+
     expect(await screen.findByRole('checkbox', { name: /public/i })).toBeInTheDocument();
     expect(screen.getByRole('checkbox', { name: /sales/i })).toBeInTheDocument();
   });
