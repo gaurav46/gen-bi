@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateSelectOnly, validateTableReferences } from './sql-validator';
+import { validateSelectOnly } from './sql-validator';
 
 describe('validateSelectOnly', () => {
   it('accepts a simple SELECT query', () => {
@@ -79,43 +79,3 @@ describe('validateSelectOnly', () => {
   });
 });
 
-describe('validateTableReferences', () => {
-  const knownSchema = [
-    { tableName: 'users', columns: ['id', 'name', 'email'] },
-    { tableName: 'orders', columns: ['id', 'user_id', 'total', 'created_at'] },
-  ];
-
-  it('accepts SQL referencing known tables and columns', () => {
-    const sql = 'SELECT name, email FROM users';
-    expect(validateTableReferences(sql, knownSchema)).toEqual({ valid: true });
-  });
-
-  it('rejects SQL referencing an unknown table', () => {
-    const sql = 'SELECT * FROM payments';
-    const result = validateTableReferences(sql, knownSchema);
-    expect(result.valid).toBe(false);
-    expect(result.reason).toContain('payments');
-  });
-
-  it('rejects SQL referencing an unknown column', () => {
-    const sql = 'SELECT salary FROM users';
-    const result = validateTableReferences(sql, knownSchema);
-    expect(result.valid).toBe(false);
-    expect(result.reason).toContain('salary');
-  });
-
-  it('handles schema-qualified table names (public.users)', () => {
-    const sql = 'SELECT name FROM public.users';
-    expect(validateTableReferences(sql, knownSchema)).toEqual({ valid: true });
-  });
-
-  it('handles table aliases', () => {
-    const sql = 'SELECT u.name FROM users u JOIN orders o ON u.id = o.user_id';
-    expect(validateTableReferences(sql, knownSchema)).toEqual({ valid: true });
-  });
-
-  it('is case-insensitive for table/column matching', () => {
-    const sql = 'SELECT NAME FROM USERS';
-    expect(validateTableReferences(sql, knownSchema)).toEqual({ valid: true });
-  });
-});

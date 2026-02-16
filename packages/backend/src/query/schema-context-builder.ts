@@ -1,6 +1,7 @@
 import type { RelevantColumn } from './schema-retrieval.port';
+import type { SampleRows } from './query.types';
 
-export function buildSchemaContext(columns: RelevantColumn[]): string {
+export function buildSchemaContext(columns: RelevantColumn[], sampleRows: SampleRows = new Map()): string {
   if (columns.length === 0) return '';
 
   const grouped = new Map<string, RelevantColumn[]>();
@@ -19,6 +20,15 @@ export function buildSchemaContext(columns: RelevantColumn[]): string {
         line += ` → FK: ${col.foreignKey.table}.${col.foreignKey.column}`;
       }
       lines.push(line);
+    }
+
+    const rows = sampleRows.get(tableName);
+    if (rows && rows.length > 0) {
+      lines.push(`  Sample rows:`);
+      for (const row of rows) {
+        const values = Object.entries(row).map(([k, v]) => `${k}: ${v}`).join(', ');
+        lines.push(`    ${values}`);
+      }
     }
   }
 

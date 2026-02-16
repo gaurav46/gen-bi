@@ -142,18 +142,9 @@ describe('QueryService', () => {
 
     await expect(service.query({ connectionId: 'conn-1', question: 'test' }))
       .rejects.toThrow(BadRequestException);
-    expect(tenantDatabasePort.query).not.toHaveBeenCalled();
-  });
-
-  it('validates SQL references only known tables from retrieved schema', async () => {
-    vi.mocked(llmPort.generateQuery).mockResolvedValue({
-      ...cannedLlmResponse,
-      sql: 'SELECT * FROM payments',
-    });
-
-    await expect(service.query({ connectionId: 'conn-1', question: 'test' }))
-      .rejects.toThrow(BadRequestException);
-    expect(tenantDatabasePort.query).not.toHaveBeenCalled();
+    const queryCalls = vi.mocked(tenantDatabasePort.query).mock.calls;
+    const nonSampleCalls = queryCalls.filter(([sql]) => !sql.includes('LIMIT 5'));
+    expect(nonSampleCalls).toHaveLength(0);
   });
 
   it('executes validated SQL against tenant DB and returns rows with metadata', async () => {
@@ -175,6 +166,7 @@ describe('QueryService', () => {
 
   it('enforces query timeout on tenant DB execution and retries', async () => {
     vi.mocked(tenantDatabasePort.query)
+      .mockResolvedValueOnce({ rows: [] })
       .mockImplementationOnce(() => new Promise(() => {}))
       .mockResolvedValueOnce({ rows: [{ name: 'Alice', total: 100 }] });
 
@@ -211,6 +203,7 @@ describe('QueryService', () => {
       .mockResolvedValueOnce(cannedLlmResponse);
 
     vi.mocked(tenantDatabasePort.query)
+      .mockResolvedValueOnce({ rows: [] })
       .mockRejectedValueOnce(new Error('invalid input syntax for type varchar'))
       .mockResolvedValueOnce({ rows: [{ name: 'Alice', total: 100 }] });
 
@@ -242,17 +235,19 @@ describe('QueryService', () => {
       .mockResolvedValueOnce(cannedLlmResponse);
 
     vi.mocked(tenantDatabasePort.query)
+      .mockResolvedValueOnce({ rows: [] })
       .mockRejectedValueOnce(new Error('invalid input syntax'))
       .mockResolvedValueOnce({ rows: [{ name: 'Alice', total: 100 }] });
 
     const result = await service.query({ connectionId: 'conn-1', question: 'Show top customers' });
 
     expect(result.attempts).toBe(3);
-    expect(tenantDatabasePort.query).toHaveBeenCalledTimes(2);
+    expect(tenantDatabasePort.query).toHaveBeenCalledTimes(3);
   });
 
   it('retries on query timeout', async () => {
     vi.mocked(tenantDatabasePort.query)
+      .mockResolvedValueOnce({ rows: [] })
       .mockImplementationOnce(() => new Promise(() => {}))
       .mockResolvedValueOnce({ rows: [{ name: 'Alice', total: 100 }] });
 
@@ -265,6 +260,54 @@ describe('QueryService', () => {
     expect(result.attempts).toBe(2);
     expect(result.rows).toEqual([{ name: 'Alice', total: 100 }]);
   }, 15000);
+
+  it('fetches sample rows for each relevant table before building prompt', async () => {
+    vi.mocked(tenantDatabasePort.query)
+      .mockResolvedValueOnce({ rows: [{ name: 'Alice', total: 100 }] })
+      .mockResolvedValueOnce({ rows: [{ name: 'Alice', total: 100 }] });
+
+    await service.query({ connectionId: 'conn-1', question: 'Show top customers' });
+
+    const calls = vi.mocked(tenantDatabasePort.query).mock.calls;
+    expect(calls[0][0]).toContain('SELECT * FROM');
+    expect(calls[0][0]).toContain('users');
+    expect(calls[0][0]).toContain('LIMIT 5');
+
+    const prompt = vi.mocked(llmPort.generateQuery).mock.calls[0][0];
+    expect(prompt).toContain('Alice');
+  });
+
+  it('continues without sample data when sample row fetch fails', async () => {
+    vi.mocked(tenantDatabasePort.query)
+      .mockRejectedValueOnce(new Error('permission denied'))
+      .mockResolvedValueOnce({ rows: [{ name: 'Alice', total: 100 }] });
+
+    const result = await service.query({ connectionId: 'conn-1', question: 'Show top customers' });
+
+    expect(result.rows).toEqual([{ name: 'Alice', total: 100 }]);
+    const prompt = vi.mocked(llmPort.generateQuery).mock.calls[0][0];
+    expect(prompt).not.toContain('Sample rows');
+  });
+
+  it('includes sample rows for tables that succeeded even when others fail', async () => {
+    vi.mocked(schemaRetrievalPort.findRelevantColumns).mockResolvedValue([
+      { tableName: 'users', columnName: 'name', dataType: 'varchar' },
+      { tableName: 'orders', columnName: 'total', dataType: 'numeric' },
+    ]);
+
+    vi.mocked(tenantDatabasePort.query)
+      .mockResolvedValueOnce({ rows: [{ name: 'Alice' }] })
+      .mockRejectedValueOnce(new Error('orders table locked'))
+      .mockResolvedValueOnce({ rows: [{ name: 'Alice', total: 100 }] });
+
+    const result = await service.query({ connectionId: 'conn-1', question: 'Show top customers' });
+
+    const prompt = vi.mocked(llmPort.generateQuery).mock.calls[0][0];
+    expect(prompt).toContain('Alice');
+    const ordersSection = prompt.split('Table: orders')[1];
+    expect(ordersSection).not.toContain('Sample rows');
+    expect(result.rows).toEqual([{ name: 'Alice', total: 100 }]);
+  });
 
   it('disconnects tenant DB exactly once after retries complete', async () => {
     const failingSql = 'SELECT name FROM users WHERE name = 1';

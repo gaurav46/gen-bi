@@ -3,13 +3,6 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { LlmPort } from './llm.port';
 import type { LlmQueryResponse } from './query.types';
 
-const SYSTEM_PROMPT = `You are a SQL expert. Given a business question, generate a structured JSON response.
-- intent: a short snake_case identifier for the query type
-- title: a human-readable title for the results
-- sql: a valid SELECT query answering the question
-- visualization: pick the best chartType (bar, line, pie, kpi_card, table)
-- columns: array of { name, type, role } where role is "dimension" or "measure"`;
-
 const OUTPUT_SCHEMA = {
   type: 'object',
   properties: {
@@ -40,6 +33,32 @@ const OUTPUT_SCHEMA = {
   additionalProperties: false,
 } as const;
 
+const SYSTEM_PROMPT = `You are a SQL expert. Given a business question and a database schema, generate a structured JSON response with these fields:
+- intent: a short snake_case identifier for the query type
+- title: a human-readable title for the results
+- sql: a valid SELECT query answering the question (PostgreSQL dialect)
+- visualization: pick the best chartType (bar, line, pie, kpi_card, table)
+- columns: array of { name, type, role } where role is "dimension" or "measure"
+
+Always respond with valid JSON only. No markdown, no code fences, just the JSON object.
+
+Use the schema context provided in the user message to determine the correct tables, columns, and joins. Follow foreign key relationships to join related tables. If sample data rows are provided, use them to understand what values look like in each column.
+
+Example 1:
+Question: "What are the top 5 departments by headcount?"
+Schema: departments(id, name), employees(id, first_name, last_name, department_id → departments.id)
+SQL: SELECT d.name, COUNT(e.id) AS headcount FROM departments d JOIN employees e ON e.department_id = d.id GROUP BY d.name ORDER BY headcount DESC LIMIT 5
+Response:
+{"intent":"top_departments_by_headcount","title":"Top 5 Departments by Headcount","sql":"SELECT d.name, COUNT(e.id) AS headcount FROM departments d JOIN employees e ON e.department_id = d.id GROUP BY d.name ORDER BY headcount DESC LIMIT 5","visualization":{"chartType":"bar"},"columns":[{"name":"name","type":"varchar","role":"dimension"},{"name":"headcount","type":"int8","role":"measure"}]}
+
+Example 2:
+Question: "Show me monthly revenue for this year"
+Schema: orders(id, total, created_at), customers(id, name)
+SQL: SELECT DATE_TRUNC('month', created_at) AS month, SUM(total) AS revenue FROM orders WHERE EXTRACT(YEAR FROM created_at) = EXTRACT(YEAR FROM CURRENT_DATE) GROUP BY month ORDER BY month
+Response:
+{"intent":"monthly_revenue","title":"Monthly Revenue This Year","sql":"SELECT DATE_TRUNC('month', created_at) AS month, SUM(total) AS revenue FROM orders WHERE EXTRACT(YEAR FROM created_at) = EXTRACT(YEAR FROM CURRENT_DATE) GROUP BY month ORDER BY month","visualization":{"chartType":"line"},"columns":[{"name":"month","type":"timestamp","role":"dimension"},{"name":"revenue","type":"numeric","role":"measure"}]}`;
+
+
 @Injectable()
 export class ClaudeAdapter implements LlmPort {
   private readonly logger = new Logger(ClaudeAdapter.name);
@@ -56,7 +75,9 @@ export class ClaudeAdapter implements LlmPort {
   async generateQuery(prompt: string): Promise<LlmQueryResponse> {
     const response = await this.client.messages.create({
       model: 'claude-sonnet-4-5-20250929',
-      max_tokens: 1024,
+      max_tokens: 16000,
+      temperature: 1,
+      thinking: { type: 'enabled', budget_tokens: 10000 },
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: prompt }],
       output_config: {

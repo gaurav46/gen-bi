@@ -116,6 +116,7 @@ describe('Query Integration: question -> embed -> retrieve -> generate -> valida
       .mockResolvedValueOnce({ ...llmResponse, sql: goodSql });
 
     vi.mocked(tenantDatabasePort.query)
+      .mockResolvedValueOnce({ rows: [{ name: 'Alice', total: 500 }] })
       .mockRejectedValueOnce(new Error('invalid input syntax for type varchar'))
       .mockResolvedValueOnce({ rows: [{ name: 'Alice', total: 500 }] });
 
@@ -127,6 +128,26 @@ describe('Query Integration: question -> embed -> retrieve -> generate -> valida
     expect(result.attempts).toBe(2);
     expect(result.rows).toEqual([{ name: 'Alice', total: 500 }]);
     expect(tenantDatabasePort.disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('includes sample data rows in the prompt sent to LLM', async () => {
+    vi.mocked(tenantDatabasePort.query)
+      .mockResolvedValueOnce({ rows: [{ name: 'Alice', total: 500 }, { name: 'Bob', total: 300 }] })
+      .mockResolvedValueOnce({ rows: [{ name: 'Alice', total: 500 }, { name: 'Bob', total: 300 }] });
+
+    const result = await service.query({
+      connectionId: 'conn-1',
+      question: 'Show top customers',
+    });
+
+    const prompt = vi.mocked(llmPort.generateQuery).mock.calls[0][0];
+    expect(prompt).toContain('Alice');
+    expect(prompt).toContain('500');
+    expect(prompt).toContain('users');
+    expect(prompt).toContain('name');
+    expect(prompt).toContain('varchar');
+
+    expect(result.rows).toEqual([{ name: 'Alice', total: 500 }, { name: 'Bob', total: 300 }]);
   });
 
   it('returns error after 3 failed attempts with attempt count', async () => {

@@ -1,3 +1,5 @@
+export type SampleRows = Map<string, Record<string, unknown>[]>;
+
 export type QueryRequest = {
   connectionId: string;
   question: string;

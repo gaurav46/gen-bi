@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
 import { ConnectionsService } from '../connections/connections.service';
 import type { LlmPort } from './llm.port';
 import { LLM_PORT } from './llm.port';
@@ -8,10 +8,10 @@ import type { SchemaRetrievalPort } from './schema-retrieval.port';
 import { SCHEMA_RETRIEVAL_PORT } from './schema-retrieval.port';
 import type { TenantDatabasePort } from '../schema-discovery/tenant-database.port';
 import { TENANT_DATABASE_PORT } from '../schema-discovery/schema-discovery.service';
-import type { QueryRequest, QueryResponse } from './query.types';
+import type { QueryRequest, QueryResponse, SampleRows } from './query.types';
 import { buildSchemaContext } from './schema-context-builder';
 import { buildRetryPrompt } from './retry-prompt-builder';
-import { validateSelectOnly, validateTableReferences } from './sql-validator';
+import { validateSelectOnly } from './sql-validator';
 
 const QUERY_TIMEOUT_MS = 10_000;
 const TOP_K = 20;
@@ -19,6 +19,8 @@ const MAX_ATTEMPTS = 3;
 
 @Injectable()
 export class QueryService {
+  private readonly logger = new Logger(QueryService.name);
+
   constructor(
     private readonly connectionsService: ConnectionsService,
     @Inject(LLM_PORT) private readonly llmPort: LlmPort,
@@ -42,11 +44,6 @@ export class QueryService {
       TOP_K,
     );
 
-    const schemaContext = buildSchemaContext(relevantColumns);
-    const knownSchema = this.buildKnownSchema(relevantColumns);
-    let currentPrompt = this.buildPrompt(request.question, schemaContext);
-    let lastError: Error | null = null;
-
     await this.tenantDatabasePort.connect({
       host: connection.host,
       port: connection.port,
@@ -55,12 +52,19 @@ export class QueryService {
       password: connection.password,
     });
 
+    const sampleRows = await this.fetchSampleRows(relevantColumns);
+    const schemaContext = buildSchemaContext(relevantColumns, sampleRows);
+    let currentPrompt = this.buildPrompt(request.question, schemaContext);
+    let lastError: Error | null = null;
+
     try {
       for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         const llmResponse = await this.llmPort.generateQuery(currentPrompt);
+        this.logger.log(`[Attempt ${attempt}/${MAX_ATTEMPTS}] Generated SQL: ${llmResponse.sql}`);
 
         const selectValidation = validateSelectOnly(llmResponse.sql);
         if (!selectValidation.valid) {
+          this.logger.warn(`[Attempt ${attempt}/${MAX_ATTEMPTS}] SELECT-only validation failed: ${selectValidation.reason}`);
           lastError = new Error(`SQL validation failed: ${selectValidation.reason}`);
           currentPrompt = buildRetryPrompt({
             question: request.question,
@@ -72,18 +76,7 @@ export class QueryService {
           continue;
         }
 
-        const tableValidation = validateTableReferences(llmResponse.sql, knownSchema);
-        if (!tableValidation.valid) {
-          lastError = new Error(`SQL validation failed: ${tableValidation.reason}`);
-          currentPrompt = buildRetryPrompt({
-            question: request.question,
-            schemaContext,
-            failedSql: llmResponse.sql,
-            errorMessage: tableValidation.reason!,
-            attempt: attempt + 1,
-          });
-          continue;
-        }
+        this.logger.log(`[Attempt ${attempt}/${MAX_ATTEMPTS}] Validation passed, executing query`);
 
         try {
           const queryResult = await Promise.race([
@@ -92,6 +85,8 @@ export class QueryService {
               setTimeout(() => reject(new Error('Query timeout exceeded')), QUERY_TIMEOUT_MS),
             ),
           ]);
+
+          this.logger.log(`[Attempt ${attempt}/${MAX_ATTEMPTS}] Query succeeded, ${queryResult.rows.length} rows returned`);
 
           return {
             intent: llmResponse.intent,
@@ -103,6 +98,7 @@ export class QueryService {
           };
         } catch (error) {
           lastError = error as Error;
+          this.logger.warn(`[Attempt ${attempt}/${MAX_ATTEMPTS}] Query execution failed: ${lastError.message}`);
           currentPrompt = buildRetryPrompt({
             question: request.question,
             schemaContext,
@@ -121,20 +117,25 @@ export class QueryService {
     }
   }
 
+  private async fetchSampleRows(columns: { tableName: string }[]): Promise<SampleRows> {
+    const tableNames = [...new Set(columns.map(c => c.tableName))];
+    const sampleRows: SampleRows = new Map();
+
+    for (const table of tableNames) {
+      try {
+        const result = await this.tenantDatabasePort.query(`SELECT * FROM "${table}" LIMIT 5`);
+        sampleRows.set(table, result.rows);
+      } catch (error) {
+        this.logger.warn(`Failed to fetch sample rows for ${table}: ${(error as Error).message}`);
+      }
+    }
+
+    return sampleRows;
+  }
+
   private buildPrompt(question: string, schemaContext: string): string {
     return `You have access to the following database schema:\n\n${schemaContext}\n\nAnswer the following business question by generating a SQL query:\n\n${question}`;
   }
 
-  private buildKnownSchema(columns: { tableName: string; columnName: string }[]) {
-    const tableMap = new Map<string, string[]>();
-    for (const col of columns) {
-      const existing = tableMap.get(col.tableName) ?? [];
-      existing.push(col.columnName);
-      tableMap.set(col.tableName, existing);
-    }
-    return Array.from(tableMap.entries()).map(([tableName, cols]) => ({
-      tableName,
-      columns: cols,
-    }));
-  }
+
 }

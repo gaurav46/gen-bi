@@ -51,4 +51,55 @@ describe('buildSchemaContext', () => {
   it('returns empty string for empty input', () => {
     expect(buildSchemaContext([])).toBe('');
   });
+
+  it('includes sample rows below column listing when provided', () => {
+    const columns: RelevantColumn[] = [
+      { tableName: 'users', columnName: 'name', dataType: 'varchar' },
+      { tableName: 'users', columnName: 'age', dataType: 'int4' },
+    ];
+    const sampleRows = new Map([
+      ['users', [
+        { name: 'Alice', age: 30 },
+        { name: 'Bob', age: 25 },
+      ]],
+    ]);
+
+    const result = buildSchemaContext(columns, sampleRows);
+
+    expect(result).toContain('Alice');
+    expect(result).toContain('Bob');
+    expect(result).toContain('30');
+    expect(result).toContain('25');
+    expect(result).toContain('Sample rows');
+  });
+
+  it('shows columns only for tables with no sample rows', () => {
+    const columns: RelevantColumn[] = [
+      { tableName: 'users', columnName: 'name', dataType: 'varchar' },
+      { tableName: 'orders', columnName: 'total', dataType: 'numeric' },
+    ];
+    const sampleRows = new Map([
+      ['users', [{ name: 'Alice' }]],
+    ]);
+
+    const result = buildSchemaContext(columns, sampleRows);
+
+    expect(result).toContain('Alice');
+    const lines = result.split('\n');
+    const ordersIndex = lines.findIndex(l => l.includes('Table: orders'));
+    const afterOrders = lines.slice(ordersIndex);
+    expect(afterOrders.join('\n')).not.toContain('Sample rows');
+  });
+
+  it('omitting sample rows parameter produces same output as before', () => {
+    const columns: RelevantColumn[] = [
+      { tableName: 'users', columnName: 'name', dataType: 'varchar' },
+    ];
+
+    const withoutParam = buildSchemaContext(columns);
+    const withEmptyMap = buildSchemaContext(columns, new Map());
+
+    expect(withoutParam).toBe(withEmptyMap);
+    expect(withoutParam).not.toContain('Sample rows');
+  });
 });

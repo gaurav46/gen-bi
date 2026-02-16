@@ -62,8 +62,62 @@ describe('ClaudeAdapter', () => {
     expect(result.columns).toHaveLength(2);
 
     const callArgs = mockCreate.mock.calls[0][0];
+    expect(callArgs.model).toBe('claude-sonnet-4-5-20250929');
+    expect(callArgs.system).toContain('SQL expert');
+    expect(callArgs.thinking.type).toBe('enabled');
+    expect(callArgs.temperature).toBe(1);
+    expect(callArgs.system).toContain('Example');
     expect(callArgs.output_config.format.type).toBe('json_schema');
-    expect(callArgs.output_config.format.schema.required).toContain('intent');
+  });
+
+  it('passes extended thinking config to Anthropic SDK', async () => {
+    const adapter = new ClaudeAdapter();
+    await adapter.generateQuery('test prompt');
+
+    const callArgs = mockCreate.mock.calls[0][0];
+    expect(callArgs.thinking).toEqual({ type: 'enabled', budget_tokens: 10000 });
+    expect(callArgs.temperature).toBe(1);
+  });
+
+  it('includes few-shot examples in the system prompt', async () => {
+    const adapter = new ClaudeAdapter();
+    await adapter.generateQuery('any question');
+
+    const callArgs = mockCreate.mock.calls[0][0];
+    const systemPrompt = callArgs.system as string;
+
+    const exampleMatches = systemPrompt.match(/Example \d+:/g) ?? [];
+    expect(exampleMatches.length).toBeGreaterThanOrEqual(2);
+
+    const selectMatches = systemPrompt.match(/SELECT/g) ?? [];
+    expect(selectMatches.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('ignores thinking blocks and parses only the text block', async () => {
+    mockCreate.mockResolvedValueOnce({
+      content: [
+        { type: 'thinking', thinking: 'Let me reason about the schema...' },
+        {
+          type: 'text',
+          text: JSON.stringify({
+            intent: 'top_customers',
+            title: 'Top Customers by Revenue',
+            sql: 'SELECT name, SUM(total) FROM customers GROUP BY name ORDER BY SUM(total) DESC LIMIT 10',
+            visualization: { chartType: 'bar' },
+            columns: [
+              { name: 'name', type: 'varchar', role: 'dimension' },
+              { name: 'total', type: 'numeric', role: 'measure' },
+            ],
+          }),
+        },
+      ],
+    });
+
+    const adapter = new ClaudeAdapter();
+    const result = await adapter.generateQuery('test');
+
+    expect(result.intent).toBe('top_customers');
+    expect(result).not.toHaveProperty('thinking');
   });
 
   it('throws when Anthropic API returns an error', async () => {
