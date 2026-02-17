@@ -9,7 +9,7 @@ import type { LlmQueryResponse } from './query.types';
 
 describe('Query Integration: question -> embed -> retrieve -> generate -> validate -> execute -> results', () => {
   let service: QueryService;
-  let connectionsService: Pick<ConnectionsService, 'findOne'>;
+  let connectionsService: Pick<ConnectionsService, 'getTenantConnectionConfig'>;
   let llmPort: LlmPort;
   let embeddingPort: EmbeddingPort;
   let schemaRetrievalPort: SchemaRetrievalPort;
@@ -28,10 +28,9 @@ describe('Query Integration: question -> embed -> retrieve -> generate -> valida
 
   beforeEach(() => {
     connectionsService = {
-      findOne: vi.fn().mockResolvedValue({
-        id: 'conn-1', host: 'localhost', port: 5432,
-        databaseName: 'tenant_db', username: 'user', password: 'pass',
-        createdAt: new Date(), updatedAt: new Date(),
+      getTenantConnectionConfig: vi.fn().mockResolvedValue({
+        host: 'localhost', port: 5432,
+        database: 'tenant_db', username: 'user', password: 'pass',
       }),
     };
 
@@ -96,6 +95,7 @@ describe('Query Integration: question -> embed -> retrieve -> generate -> valida
       intent: 'top_customers',
       title: 'Top Customers by Revenue',
       sql: llmResponse.sql,
+      visualization: llmResponse.visualization,
       columns: llmResponse.columns,
       rows: [
         { name: 'Alice', total: 500 },

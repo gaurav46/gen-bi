@@ -39,7 +39,6 @@
     "@swc/cli": "^0.6.0",
     "@swc/core": "^1.15.11",
     "@types/express": "^5.0.0",
-    "@types/jest": "^29.5.14",
     "@types/node": "^24.10.13",
     "@types/supertest": "^6.0.3",
     "dotenv": "^17.3.1",
@@ -59,22 +58,5 @@
     "typescript-eslint": "^8.20.0",
     "unplugin-swc": "^1.5.9",
     "vitest": "^4.0.18"
-  },
-  "jest": {
-    "moduleFileExtensions": [
-      "js",
-      "json",
-      "ts"
-    ],
-    "rootDir": "src",
-    "testRegex": ".*\\.spec\\.ts$",
-    "transform": {
-      "^.+\\.(t|j)s$": "ts-jest"
-    },
-    "collectCoverageFrom": [
-      "**/*.(t|j)s"
-    ],
-    "coverageDirectory": "../coverage",
-    "testEnvironment": "node"
   }
 }

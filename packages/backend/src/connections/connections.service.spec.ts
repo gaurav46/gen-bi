@@ -123,6 +123,32 @@ describe('ConnectionsService', () => {
     expect(result.host).toBe(longHost);
   });
 
+  it('getTenantConnectionConfig maps databaseName to database', async () => {
+    const { encrypt } = await import('./encryption');
+    const encryptedPassword = encrypt('secret');
+
+    mockPrisma.connectionConfig.findUnique.mockResolvedValue({
+      id: 'test-id',
+      host: 'localhost',
+      port: 5432,
+      databaseName: 'mydb',
+      username: 'admin',
+      encryptedPassword,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const result = await service.getTenantConnectionConfig('test-id');
+
+    expect(result).toEqual({
+      host: 'localhost',
+      port: 5432,
+      database: 'mydb',
+      username: 'admin',
+      password: 'secret',
+    });
+  });
+
   it('loads connection config and decrypts password', async () => {
     const { encrypt } = await import('./encryption');
     const encryptedPassword = encrypt('secret');

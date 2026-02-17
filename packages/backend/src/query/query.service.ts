@@ -30,8 +30,6 @@ export class QueryService {
   ) {}
 
   async query(request: QueryRequest): Promise<QueryResponse> {
-    const connection = await this.connectionsService.findOne(request.connectionId);
-
     const hasEmbeddings = await this.schemaRetrievalPort.hasEmbeddings(request.connectionId);
     if (!hasEmbeddings) {
       throw new BadRequestException('No embeddings found for this connection. Run schema discovery first.');
@@ -44,13 +42,8 @@ export class QueryService {
       TOP_K,
     );
 
-    await this.tenantDatabasePort.connect({
-      host: connection.host,
-      port: connection.port,
-      database: connection.databaseName,
-      username: connection.username,
-      password: connection.password,
-    });
+    const config = await this.connectionsService.getTenantConnectionConfig(request.connectionId);
+    await this.tenantDatabasePort.connect(config);
 
     const sampleRows = await this.fetchSampleRows(relevantColumns);
     const schemaContext = buildSchemaContext(relevantColumns, sampleRows);
@@ -92,6 +85,7 @@ export class QueryService {
             intent: llmResponse.intent,
             title: llmResponse.title,
             sql: llmResponse.sql,
+            visualization: llmResponse.visualization,
             columns: llmResponse.columns,
             rows: queryResult.rows,
             attempts: attempt,

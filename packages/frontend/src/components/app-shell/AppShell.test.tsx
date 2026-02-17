@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import { AppShell } from './AppShell';
 import type { SchemaDataPort } from '../../ports/schema-data-port';
 import type { QueryPort } from '../../ports/query-port';
+import type { DashboardPort } from '../../ports/dashboard-port';
 
 function createMockSchemaPort(): SchemaDataPort {
   return { fetchTables: vi.fn().mockResolvedValue([]) };
@@ -11,6 +13,31 @@ function createMockSchemaPort(): SchemaDataPort {
 
 function createMockQueryPort(): QueryPort {
   return { submitQuery: vi.fn().mockResolvedValue({}) };
+}
+
+function createMockDashboardPort(): DashboardPort {
+  return {
+    listDashboards: vi.fn().mockResolvedValue([]),
+    createDashboard: vi.fn(),
+    addWidget: vi.fn(),
+    getDashboard: vi.fn(),
+    executeWidget: vi.fn(),
+    updateWidget: vi.fn(),
+    removeWidget: vi.fn(),
+    deleteDashboard: vi.fn(),
+  };
+}
+
+function renderShell(initialPath = '/') {
+  return render(
+    <MemoryRouter initialEntries={[initialPath]}>
+      <AppShell
+        schemaPort={createMockSchemaPort()}
+        queryPort={createMockQueryPort()}
+        dashboardPort={createMockDashboardPort()}
+      />
+    </MemoryRouter>,
+  );
 }
 
 describe('AppShell', () => {
@@ -28,7 +55,7 @@ describe('AppShell', () => {
   });
 
   it('shows landing page with connection form when no connectionId', () => {
-    render(<AppShell schemaPort={createMockSchemaPort()} queryPort={createMockQueryPort()} />);
+    renderShell();
 
     expect(screen.getByText('Gen BI')).toBeInTheDocument();
     expect(screen.getByLabelText(/host/i)).toBeInTheDocument();
@@ -38,7 +65,7 @@ describe('AppShell', () => {
 
   it('shows sidebar and main content when connectionId exists', () => {
     localStorage.setItem('connectionId', 'conn-1');
-    render(<AppShell schemaPort={createMockSchemaPort()} queryPort={createMockQueryPort()} />);
+    renderShell();
 
     expect(screen.getByText('Schema Explorer')).toBeInTheDocument();
     expect(screen.getByText('Settings')).toBeInTheDocument();
@@ -52,7 +79,7 @@ describe('AppShell', () => {
     vi.stubGlobal('fetch', fetchSpy);
 
     const user = userEvent.setup();
-    render(<AppShell schemaPort={createMockSchemaPort()} queryPort={createMockQueryPort()} />);
+    renderShell();
 
     await user.type(screen.getByLabelText(/host/i), 'localhost');
     await user.type(screen.getByLabelText(/database/i), 'mydb');
@@ -67,7 +94,7 @@ describe('AppShell', () => {
 
   it('switches between Schema Explorer and Settings pages', async () => {
     localStorage.setItem('connectionId', 'conn-1');
-    render(<AppShell schemaPort={createMockSchemaPort()} queryPort={createMockQueryPort()} />);
+    renderShell();
 
     await waitFor(() => {
       expect(screen.getByText('No tables discovered. Run analysis in Settings first.')).toBeInTheDocument();

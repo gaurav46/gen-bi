@@ -1,21 +1,31 @@
 import { useState } from 'react';
 import { useWorkspace } from '../../hooks/useWorkspace';
 import type { QueryPort } from '../../ports/query-port';
+import type { DashboardPort } from '../../ports/dashboard-port';
+import type { ChartTypeValue } from '../../domain/chart-types';
+import { ChartRenderer } from './ChartRenderer';
+import { ChartTypeSelector } from './ChartTypeSelector';
+import { AddToDashboardDropdown } from './AddToDashboardDropdown';
 import { ResultsTable } from './ResultsTable';
 import { SqlDisplay } from './SqlDisplay';
 
 type WorkspacePageProps = {
   port: QueryPort;
+  dashboardPort: DashboardPort;
 };
 
-export function WorkspacePage({ port }: WorkspacePageProps) {
+export function WorkspacePage({ port, dashboardPort }: WorkspacePageProps) {
   const [question, setQuestion] = useState('');
+  const [overrideChartType, setOverrideChartType] = useState<ChartTypeValue | null>(null);
   const { response, isLoading, error, submit } = useWorkspace(port);
   const connectionId = localStorage.getItem('connectionId');
+
+  const activeChartType: ChartTypeValue | undefined = overrideChartType ?? (response?.visualization.chartType as ChartTypeValue);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!question.trim() || !connectionId) return;
+    setOverrideChartType(null);
     submit(connectionId, question.trim());
   };
 
@@ -55,7 +65,31 @@ export function WorkspacePage({ port }: WorkspacePageProps) {
               </p>
             )}
           </div>
-          <ResultsTable columns={response.columns} rows={response.rows} />
+          <div className="flex items-center justify-between">
+            <ChartTypeSelector
+              selected={activeChartType!}
+              onSelect={setOverrideChartType}
+            />
+            <AddToDashboardDropdown
+              port={dashboardPort}
+              connectionId={connectionId!}
+              widgetData={{
+                title: response.title,
+                sql: response.sql,
+                chartType: activeChartType!,
+                columns: response.columns,
+              }}
+            />
+          </div>
+          {activeChartType === 'table' ? (
+            <ResultsTable columns={response.columns} rows={response.rows} />
+          ) : (
+            <ChartRenderer
+              chartType={activeChartType!}
+              columns={response.columns}
+              rows={response.rows}
+            />
+          )}
           <SqlDisplay sql={response.sql} />
         </div>
       )}

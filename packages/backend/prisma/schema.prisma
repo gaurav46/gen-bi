@@ -70,6 +70,31 @@ model DiscoveredIndex {
   @@map("discovered_indexes")
 }
 
+model Dashboard {
+  id           String   @id @default(uuid())
+  connectionId String   @map("connection_id")
+  name         String
+  createdAt    DateTime @default(now()) @map("created_at")
+  widgets      Widget[]
+
+  @@map("dashboards")
+}
+
+model Widget {
+  id          String    @id @default(uuid())
+  dashboardId String    @map("dashboard_id")
+  title       String
+  sql         String
+  chartType   String    @map("chart_type")
+  columns      Json
+  legendLabels Json?     @map("legend_labels")
+  position     Int       @default(0)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  dashboard   Dashboard @relation(fields: [dashboardId], references: [id], onDelete: Cascade)
+
+  @@map("widgets")
+}
+
 model ColumnEmbedding {
   id           String                    @id @default(uuid())
   connectionId String                    @map("connection_id")

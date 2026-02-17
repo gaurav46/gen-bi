@@ -19,15 +19,12 @@ const cannedLlmResponse: LlmQueryResponse = {
   ],
 };
 
-const connectionConfig = {
-  id: 'conn-1',
+const tenantConfig = {
   host: 'localhost',
   port: 5432,
-  databaseName: 'tenant_db',
+  database: 'tenant_db',
   username: 'user',
   password: 'pass',
-  createdAt: new Date(),
-  updatedAt: new Date(),
 };
 
 const relevantColumns = [
@@ -37,7 +34,7 @@ const relevantColumns = [
 
 describe('QueryService', () => {
   let service: QueryService;
-  let connectionsService: Pick<ConnectionsService, 'findOne'>;
+  let connectionsService: Pick<ConnectionsService, 'getTenantConnectionConfig'>;
   let llmPort: LlmPort;
   let embeddingPort: EmbeddingPort;
   let schemaRetrievalPort: SchemaRetrievalPort;
@@ -45,7 +42,7 @@ describe('QueryService', () => {
 
   beforeEach(() => {
     connectionsService = {
-      findOne: vi.fn().mockResolvedValue(connectionConfig),
+      getTenantConnectionConfig: vi.fn().mockResolvedValue(tenantConfig),
     };
 
     llmPort = {
@@ -79,13 +76,13 @@ describe('QueryService', () => {
   it('validates connection, builds prompt, calls LLM port, returns response', async () => {
     const result = await service.query({ connectionId: 'conn-1', question: 'Show top customers' });
 
-    expect(connectionsService.findOne).toHaveBeenCalledWith('conn-1');
+    expect(connectionsService.getTenantConnectionConfig).toHaveBeenCalledWith('conn-1');
     expect(llmPort.generateQuery).toHaveBeenCalledWith(expect.any(String));
     expect(result.intent).toBe('top_customers');
   });
 
   it('throws when connectionId not found', async () => {
-    vi.mocked(connectionsService.findOne).mockRejectedValue(
+    vi.mocked(connectionsService.getTenantConnectionConfig).mockRejectedValue(
       new NotFoundException('Connection config conn-1 not found'),
     );
 
@@ -150,13 +147,7 @@ describe('QueryService', () => {
   it('executes validated SQL against tenant DB and returns rows with metadata', async () => {
     const result = await service.query({ connectionId: 'conn-1', question: 'Show top customers' });
 
-    expect(tenantDatabasePort.connect).toHaveBeenCalledWith({
-      host: 'localhost',
-      port: 5432,
-      database: 'tenant_db',
-      username: 'user',
-      password: 'pass',
-    });
+    expect(tenantDatabasePort.connect).toHaveBeenCalledWith(tenantConfig);
     expect(tenantDatabasePort.query).toHaveBeenCalledWith(cannedLlmResponse.sql);
     expect(tenantDatabasePort.disconnect).toHaveBeenCalled();
     expect(result.rows).toEqual([{ name: 'Alice', total: 100 }]);

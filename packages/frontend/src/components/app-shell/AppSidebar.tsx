@@ -1,4 +1,5 @@
-import { Database, MessageSquare, Settings } from 'lucide-react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { Database, LayoutDashboard, MessageSquare, Settings } from 'lucide-react';
 import {
   Sidebar,
   SidebarContent,
@@ -10,20 +11,22 @@ import {
   SidebarHeader,
 } from '@/components/ui/sidebar';
 
-export type PageId = 'schema-explorer' | 'workspace' | 'settings';
-
-type AppSidebarProps = {
-  activePage: PageId;
-  onNavigate: (page: PageId) => void;
-};
-
-const navItems: { id: PageId; label: string; icon: typeof Database }[] = [
-  { id: 'schema-explorer', label: 'Schema Explorer', icon: Database },
-  { id: 'workspace', label: 'Workspace', icon: MessageSquare },
-  { id: 'settings', label: 'Settings', icon: Settings },
+const navItems: { path: string; label: string; icon: typeof Database }[] = [
+  { path: '/dashboards', label: 'Dashboards', icon: LayoutDashboard },
+  { path: '/workspace', label: 'Workspace', icon: MessageSquare },
+  { path: '/', label: 'Schema Explorer', icon: Database },
+  { path: '/settings', label: 'Settings', icon: Settings },
 ];
 
-export function AppSidebar({ activePage, onNavigate }: AppSidebarProps) {
+export function AppSidebar() {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  function isActive(path: string) {
+    if (path === '/') return location.pathname === '/';
+    return location.pathname.startsWith(path);
+  }
+
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader className="p-3">
@@ -34,10 +37,10 @@ export function AppSidebar({ activePage, onNavigate }: AppSidebarProps) {
           <SidebarGroupContent>
             <SidebarMenu>
               {navItems.map((item) => (
-                <SidebarMenuItem key={item.id}>
+                <SidebarMenuItem key={item.path}>
                   <SidebarMenuButton
-                    isActive={item.id === activePage}
-                    onClick={() => onNavigate(item.id)}
+                    isActive={isActive(item.path)}
+                    onClick={() => navigate(item.path)}
                   >
                     <item.icon className="size-4" />
                     <span>{item.label}</span>

@@ -7,15 +7,12 @@ import { ConnectionsService } from '../connections/connections.service';
 describe('Embedding Integration', () => {
   it('analyzeSchemas discovers metadata then generates and stores embeddings', async () => {
     const connectionsService = {
-      findOne: vi.fn().mockResolvedValue({
-        id: 'conn-id',
+      getTenantConnectionConfig: vi.fn().mockResolvedValue({
         host: 'localhost',
         port: 5432,
-        databaseName: 'tenant_db',
+        database: 'tenant_db',
         username: 'user',
         password: 'pass',
-        createdAt: new Date(),
-        updatedAt: new Date(),
       }),
     } as unknown as ConnectionsService;
 

@@ -39,16 +39,10 @@ export class SchemaDiscoveryService {
     this.progress = { status: 'analyzing', current: 0, total: 0, message: 'Starting analysis...' };
     this.logger.log(`Starting schema analysis for connection ${connectionId}, schemas: ${schemas.join(', ')}`);
 
-    const config = await this.connectionsService.findOne(connectionId);
+    const config = await this.connectionsService.getTenantConnectionConfig(connectionId);
 
     try {
-      await this.tenantDatabasePort.connect({
-        host: config.host,
-        port: config.port,
-        database: config.databaseName,
-        username: config.username,
-        password: config.password,
-      });
+      await this.tenantDatabasePort.connect(config);
 
       const placeholders = schemas.map((_, i) => `$${i + 1}`).join(', ');
 
@@ -171,16 +165,10 @@ export class SchemaDiscoveryService {
   }
 
   async testConnection(connectionId: string) {
-    const config = await this.connectionsService.findOne(connectionId);
+    const config = await this.connectionsService.getTenantConnectionConfig(connectionId);
 
     try {
-      await this.tenantDatabasePort.connect({
-        host: config.host,
-        port: config.port,
-        database: config.databaseName,
-        username: config.username,
-        password: config.password,
-      });
+      await this.tenantDatabasePort.connect(config);
 
       const result = await this.tenantDatabasePort.query(
         'SELECT schema_name FROM information_schema.schemata ORDER BY schema_name ASC'

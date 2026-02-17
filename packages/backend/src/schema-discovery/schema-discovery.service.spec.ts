@@ -5,28 +5,25 @@ import type { TenantDatabasePort } from './tenant-database.port';
 import type { EmbeddingPort } from './embedding.port';
 import { ConnectionsService } from '../connections/connections.service';
 
-const defaultConfig = {
-  id: 'conn-id',
+const defaultTenantConfig = {
   host: 'localhost',
   port: 5432,
-  databaseName: 'tenant_db',
+  database: 'tenant_db',
   username: 'tenant_user',
   password: 'tenant_password',
-  createdAt: new Date(),
-  updatedAt: new Date(),
 };
 
 describe('SchemaDiscoveryService', () => {
   let service: SchemaDiscoveryService;
-  let connectionsService: Pick<ConnectionsService, 'findOne'>;
+  let connectionsService: Pick<ConnectionsService, 'getTenantConnectionConfig'>;
   let tenantDatabasePort: TenantDatabasePort;
   let mockPrisma: Record<string, any>;
   let mockEmbeddingPort: EmbeddingPort;
 
   beforeEach(() => {
     connectionsService = {
-      findOne: vi.fn(),
-    } as unknown as Pick<ConnectionsService, 'findOne'>;
+      getTenantConnectionConfig: vi.fn(),
+    } as unknown as Pick<ConnectionsService, 'getTenantConnectionConfig'>;
 
     tenantDatabasePort = {
       connect: vi.fn(),
@@ -58,16 +55,7 @@ describe('SchemaDiscoveryService', () => {
   });
 
   it('loads config, connects, discovers schemas, filters system schemas, and disconnects', async () => {
-    vi.mocked(connectionsService.findOne).mockResolvedValue({
-      id: 'conn-id',
-      host: 'localhost',
-      port: 5432,
-      databaseName: 'tenant_db',
-      username: 'tenant_user',
-      password: 'tenant_password',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
+    vi.mocked(connectionsService.getTenantConnectionConfig).mockResolvedValue(defaultTenantConfig);
     vi.mocked(tenantDatabasePort.query).mockResolvedValue({
       rows: [
         { schema_name: 'public' },
@@ -80,14 +68,8 @@ describe('SchemaDiscoveryService', () => {
 
     const result = await service.testConnection('conn-id');
 
-    expect(connectionsService.findOne).toHaveBeenCalledWith('conn-id');
-    expect(tenantDatabasePort.connect).toHaveBeenCalledWith({
-      host: 'localhost',
-      port: 5432,
-      database: 'tenant_db',
-      username: 'tenant_user',
-      password: 'tenant_password',
-    });
+    expect(connectionsService.getTenantConnectionConfig).toHaveBeenCalledWith('conn-id');
+    expect(tenantDatabasePort.connect).toHaveBeenCalledWith(defaultTenantConfig);
     expect(tenantDatabasePort.query).toHaveBeenCalledWith(
       'SELECT schema_name FROM information_schema.schemata ORDER BY schema_name ASC'
     );
@@ -96,16 +78,7 @@ describe('SchemaDiscoveryService', () => {
   });
 
   it('returns connection error when tenant DB is unreachable', async () => {
-    vi.mocked(connectionsService.findOne).mockResolvedValue({
-      id: 'conn-id',
-      host: 'localhost',
-      port: 5432,
-      databaseName: 'tenant_db',
-      username: 'tenant_user',
-      password: 'tenant_password',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
+    vi.mocked(connectionsService.getTenantConnectionConfig).mockResolvedValue(defaultTenantConfig);
     vi.mocked(tenantDatabasePort.connect).mockRejectedValue(new Error('Failed to connect to tenant database: timeout'));
 
     await expect(service.testConnection('conn-id')).rejects.toThrow('Failed to connect to tenant database');
@@ -113,16 +86,7 @@ describe('SchemaDiscoveryService', () => {
   });
 
   it('throws error when database has zero non-system schemas', async () => {
-    vi.mocked(connectionsService.findOne).mockResolvedValue({
-      id: 'conn-id',
-      host: 'localhost',
-      port: 5432,
-      databaseName: 'tenant_db',
-      username: 'tenant_user',
-      password: 'tenant_password',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
+    vi.mocked(connectionsService.getTenantConnectionConfig).mockResolvedValue(defaultTenantConfig);
     vi.mocked(tenantDatabasePort.query).mockResolvedValue({
       rows: [{ schema_name: 'information_schema' }, { schema_name: 'pg_catalog' }],
     });
@@ -131,16 +95,7 @@ describe('SchemaDiscoveryService', () => {
   });
 
   it('disconnect is called even when query fails', async () => {
-    vi.mocked(connectionsService.findOne).mockResolvedValue({
-      id: 'conn-id',
-      host: 'localhost',
-      port: 5432,
-      databaseName: 'tenant_db',
-      username: 'tenant_user',
-      password: 'tenant_password',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
+    vi.mocked(connectionsService.getTenantConnectionConfig).mockResolvedValue(defaultTenantConfig);
     vi.mocked(tenantDatabasePort.query).mockRejectedValue(new Error('query failed'));
 
     await expect(service.testConnection('conn-id')).rejects.toThrow('query failed');
@@ -148,16 +103,7 @@ describe('SchemaDiscoveryService', () => {
   });
 
   it('filters all known PostgreSQL system schemas', async () => {
-    vi.mocked(connectionsService.findOne).mockResolvedValue({
-      id: 'conn-id',
-      host: 'localhost',
-      port: 5432,
-      databaseName: 'tenant_db',
-      username: 'tenant_user',
-      password: 'tenant_password',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
+    vi.mocked(connectionsService.getTenantConnectionConfig).mockResolvedValue(defaultTenantConfig);
     vi.mocked(tenantDatabasePort.query).mockResolvedValue({
       rows: [
         { schema_name: 'public' },
@@ -173,13 +119,13 @@ describe('SchemaDiscoveryService', () => {
   });
 
   it('returns 404 when connection config does not exist', async () => {
-    vi.mocked(connectionsService.findOne).mockRejectedValue(new NotFoundException('Connection config conn-id not found'));
+    vi.mocked(connectionsService.getTenantConnectionConfig).mockRejectedValue(new NotFoundException('Connection config conn-id not found'));
 
     await expect(service.testConnection('conn-id')).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('analyzeSchemas discovers tables from information_schema for selected schemas', async () => {
-    vi.mocked(connectionsService.findOne).mockResolvedValue(defaultConfig);
+    vi.mocked(connectionsService.getTenantConnectionConfig).mockResolvedValue(defaultTenantConfig);
     vi.mocked(tenantDatabasePort.query).mockImplementation(async (sql: string) => {
       if (sql.includes('information_schema.tables')) {
         return { rows: [
@@ -192,11 +138,8 @@ describe('SchemaDiscoveryService', () => {
 
     const result = await service.analyzeSchemas('conn-id', ['public']);
 
-    expect(connectionsService.findOne).toHaveBeenCalledWith('conn-id');
-    expect(tenantDatabasePort.connect).toHaveBeenCalledWith({
-      host: 'localhost', port: 5432, database: 'tenant_db',
-      username: 'tenant_user', password: 'tenant_password',
-    });
+    expect(connectionsService.getTenantConnectionConfig).toHaveBeenCalledWith('conn-id');
+    expect(tenantDatabasePort.connect).toHaveBeenCalledWith(defaultTenantConfig);
     expect(tenantDatabasePort.query).toHaveBeenCalledWith(
       expect.stringContaining('information_schema.tables'),
       expect.arrayContaining(['public']),
@@ -206,7 +149,7 @@ describe('SchemaDiscoveryService', () => {
   });
 
   it('analyzeSchemas discovers columns for each discovered table', async () => {
-    vi.mocked(connectionsService.findOne).mockResolvedValue(defaultConfig);
+    vi.mocked(connectionsService.getTenantConnectionConfig).mockResolvedValue(defaultTenantConfig);
     vi.mocked(tenantDatabasePort.query).mockImplementation(async (sql: string) => {
       if (sql.includes('information_schema.tables')) {
         return { rows: [{ table_schema: 'public', table_name: 'users' }] };
@@ -239,7 +182,7 @@ describe('SchemaDiscoveryService', () => {
   });
 
   it('analyzeSchemas discovers foreign keys via information_schema', async () => {
-    vi.mocked(connectionsService.findOne).mockResolvedValue(defaultConfig);
+    vi.mocked(connectionsService.getTenantConnectionConfig).mockResolvedValue(defaultTenantConfig);
     vi.mocked(tenantDatabasePort.query).mockImplementation(async (sql: string) => {
       if (sql.includes('information_schema.tables')) {
         return { rows: [{ table_schema: 'public', table_name: 'orders' }] };
@@ -274,7 +217,7 @@ describe('SchemaDiscoveryService', () => {
   });
 
   it('analyzeSchemas discovers indexes with correct column names', async () => {
-    vi.mocked(connectionsService.findOne).mockResolvedValue(defaultConfig);
+    vi.mocked(connectionsService.getTenantConnectionConfig).mockResolvedValue(defaultTenantConfig);
     vi.mocked(tenantDatabasePort.query).mockImplementation(async (sql: string) => {
       if (sql.includes('information_schema.tables')) {
         return { rows: [{ table_schema: 'public', table_name: 'users' }] };
@@ -307,7 +250,7 @@ describe('SchemaDiscoveryService', () => {
   });
 
   it('analyzeSchemas deletes existing metadata and persists new results', async () => {
-    vi.mocked(connectionsService.findOne).mockResolvedValue(defaultConfig);
+    vi.mocked(connectionsService.getTenantConnectionConfig).mockResolvedValue(defaultTenantConfig);
     vi.mocked(tenantDatabasePort.query).mockImplementation(async (sql: string) => {
       if (sql.includes('information_schema.tables')) {
         return { rows: [{ table_schema: 'public', table_name: 'users' }] };
@@ -324,7 +267,7 @@ describe('SchemaDiscoveryService', () => {
   });
 
   it('analyzeSchemas updates progress during analysis', async () => {
-    vi.mocked(connectionsService.findOne).mockResolvedValue(defaultConfig);
+    vi.mocked(connectionsService.getTenantConnectionConfig).mockResolvedValue(defaultTenantConfig);
     vi.mocked(tenantDatabasePort.query).mockImplementation(async (sql: string) => {
       if (sql.includes('information_schema.tables')) {
         return { rows: [
@@ -356,7 +299,7 @@ describe('SchemaDiscoveryService', () => {
   });
 
   it('analyzeSchemas throws error when selected schema has zero tables', async () => {
-    vi.mocked(connectionsService.findOne).mockResolvedValue(defaultConfig);
+    vi.mocked(connectionsService.getTenantConnectionConfig).mockResolvedValue(defaultTenantConfig);
     vi.mocked(tenantDatabasePort.query).mockImplementation(async (sql: string) => {
       if (sql.includes('information_schema.tables')) {
         return { rows: [] };
@@ -368,7 +311,7 @@ describe('SchemaDiscoveryService', () => {
   });
 
   it('analyzeSchemas handles 100+ tables without error', async () => {
-    vi.mocked(connectionsService.findOne).mockResolvedValue(defaultConfig);
+    vi.mocked(connectionsService.getTenantConnectionConfig).mockResolvedValue(defaultTenantConfig);
     const tableRows = Array.from({ length: 120 }, (_, i) => ({ table_schema: 'public', table_name: `table_${i}` }));
     vi.mocked(tenantDatabasePort.query).mockImplementation(async (sql: string) => {
       if (sql.includes('information_schema.tables')) return { rows: tableRows };
@@ -383,7 +326,7 @@ describe('SchemaDiscoveryService', () => {
   });
 
   it('analyzeSchemas disconnects even when a query fails mid-analysis', async () => {
-    vi.mocked(connectionsService.findOne).mockResolvedValue(defaultConfig);
+    vi.mocked(connectionsService.getTenantConnectionConfig).mockResolvedValue(defaultTenantConfig);
     vi.mocked(tenantDatabasePort.query).mockImplementation(async (sql: string) => {
       if (sql.includes('information_schema.tables')) {
         return { rows: [{ table_schema: 'public', table_name: 'users' }] };
@@ -399,13 +342,13 @@ describe('SchemaDiscoveryService', () => {
   });
 
   it('analyzeSchemas returns 404 when connectionId does not exist', async () => {
-    vi.mocked(connectionsService.findOne).mockRejectedValue(new NotFoundException('not found'));
+    vi.mocked(connectionsService.getTenantConnectionConfig).mockRejectedValue(new NotFoundException('not found'));
 
     await expect(service.analyzeSchemas('bad-id', ['public'])).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('schema names are parameterized in queries', async () => {
-    vi.mocked(connectionsService.findOne).mockResolvedValue(defaultConfig);
+    vi.mocked(connectionsService.getTenantConnectionConfig).mockResolvedValue(defaultTenantConfig);
     vi.mocked(tenantDatabasePort.query).mockImplementation(async (sql: string) => {
       if (sql.includes('information_schema.tables')) {
         return { rows: [{ table_schema: 'public', table_name: 'users' }] };
@@ -423,7 +366,7 @@ describe('SchemaDiscoveryService', () => {
   });
 
   it('analyzeSchemas generates embeddings for discovered columns after metadata persistence', async () => {
-    vi.mocked(connectionsService.findOne).mockResolvedValue(defaultConfig);
+    vi.mocked(connectionsService.getTenantConnectionConfig).mockResolvedValue(defaultTenantConfig);
     vi.mocked(tenantDatabasePort.query).mockImplementation(async (sql: string) => {
       if (sql.includes('information_schema.tables')) {
         return { rows: [{ table_schema: 'public', table_name: 'users' }] };
@@ -448,7 +391,7 @@ describe('SchemaDiscoveryService', () => {
   });
 
   it('analyzeSchemas updates progress to Generating embeddings during embedding step', async () => {
-    vi.mocked(connectionsService.findOne).mockResolvedValue(defaultConfig);
+    vi.mocked(connectionsService.getTenantConnectionConfig).mockResolvedValue(defaultTenantConfig);
     const progressMessages: string[] = [];
     vi.mocked(tenantDatabasePort.query).mockImplementation(async (sql: string) => {
       if (sql.includes('information_schema.tables')) {
@@ -472,7 +415,7 @@ describe('SchemaDiscoveryService', () => {
   });
 
   it('analyzeSchemas deletes existing embeddings for connectionId before storing new ones', async () => {
-    vi.mocked(connectionsService.findOne).mockResolvedValue(defaultConfig);
+    vi.mocked(connectionsService.getTenantConnectionConfig).mockResolvedValue(defaultTenantConfig);
     vi.mocked(tenantDatabasePort.query).mockImplementation(async (sql: string) => {
       if (sql.includes('information_schema.tables')) {
         return { rows: [{ table_schema: 'public', table_name: 'users' }] };
@@ -497,7 +440,7 @@ describe('SchemaDiscoveryService', () => {
   });
 
   it('analyzeSchemas reports error when embedding generation fails but metadata is preserved', async () => {
-    vi.mocked(connectionsService.findOne).mockResolvedValue(defaultConfig);
+    vi.mocked(connectionsService.getTenantConnectionConfig).mockResolvedValue(defaultTenantConfig);
     vi.mocked(tenantDatabasePort.query).mockImplementation(async (sql: string) => {
       if (sql.includes('information_schema.tables')) {
         return { rows: [{ table_schema: 'public', table_name: 'users' }] };
@@ -517,7 +460,7 @@ describe('SchemaDiscoveryService', () => {
   });
 
   it('analyzeSchemas skips embedding generation when no columns are discovered', async () => {
-    vi.mocked(connectionsService.findOne).mockResolvedValue(defaultConfig);
+    vi.mocked(connectionsService.getTenantConnectionConfig).mockResolvedValue(defaultTenantConfig);
     vi.mocked(tenantDatabasePort.query).mockImplementation(async (sql: string) => {
       if (sql.includes('information_schema.tables')) {
         return { rows: [{ table_schema: 'public', table_name: 'empty_table' }] };
@@ -531,7 +474,7 @@ describe('SchemaDiscoveryService', () => {
   });
 
   it('second analyzeSchemas call while one is running rejects', async () => {
-    vi.mocked(connectionsService.findOne).mockResolvedValue(defaultConfig);
+    vi.mocked(connectionsService.getTenantConnectionConfig).mockResolvedValue(defaultTenantConfig);
     let resolveQuery: () => void;
     const blockingPromise = new Promise<void>((r) => { resolveQuery = r; });
     vi.mocked(tenantDatabasePort.query).mockImplementation(async (sql: string) => {

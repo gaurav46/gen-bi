@@ -1,23 +1,27 @@
 import { useState } from 'react';
+import { Routes, Route } from 'react-router-dom';
 import { SidebarProvider, SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
-import { AppSidebar, type PageId } from './AppSidebar';
+import { AppSidebar } from './AppSidebar';
 import { SchemaExplorerPage } from '../schema-explorer/SchemaExplorerPage';
 import { SettingsForm } from '../settings-form/SettingsForm';
 import { ConnectionForm } from '../settings-form/ConnectionForm';
 import { WorkspacePage } from '../workspace/WorkspacePage';
+import { DashboardsLandingPage } from '../dashboards/DashboardsLandingPage';
+import { DashboardDetailPage } from '../dashboards/DashboardDetailPage';
 import type { SchemaDataPort } from '../../ports/schema-data-port';
 import type { QueryPort } from '../../ports/query-port';
+import type { DashboardPort } from '../../ports/dashboard-port';
 
 type AppShellProps = {
   schemaPort: SchemaDataPort;
   queryPort: QueryPort;
+  dashboardPort: DashboardPort;
 };
 
-export function AppShell({ schemaPort, queryPort }: AppShellProps) {
+export function AppShell({ schemaPort, queryPort, dashboardPort }: AppShellProps) {
   const [connectionId, setConnectionId] = useState<string | null>(
     () => localStorage.getItem('connectionId'),
   );
-  const [activePage, setActivePage] = useState<PageId>('schema-explorer');
 
   if (!connectionId) {
     return (
@@ -32,15 +36,19 @@ export function AppShell({ schemaPort, queryPort }: AppShellProps) {
 
   return (
     <SidebarProvider>
-      <AppSidebar activePage={activePage} onNavigate={setActivePage} />
+      <AppSidebar />
       <SidebarInset>
         <header className="flex h-12 items-center border-b px-3">
           <SidebarTrigger />
         </header>
         <div className="flex-1">
-          {activePage === 'schema-explorer' && <SchemaExplorerPage port={schemaPort} />}
-          {activePage === 'workspace' && <WorkspacePage port={queryPort} />}
-          {activePage === 'settings' && <SettingsForm />}
+          <Routes>
+            <Route index element={<SchemaExplorerPage port={schemaPort} />} />
+            <Route path="workspace" element={<WorkspacePage port={queryPort} dashboardPort={dashboardPort} />} />
+            <Route path="dashboards" element={<DashboardsLandingPage dashboardPort={dashboardPort} connectionId={connectionId} />} />
+            <Route path="dashboards/:id" element={<DashboardDetailPage dashboardPort={dashboardPort} />} />
+            <Route path="settings" element={<SettingsForm />} />
+          </Routes>
         </div>
       </SidebarInset>
     </SidebarProvider>

@@ -1,5 +1,6 @@
 import { Injectable, Inject, NotFoundException } from '@nestjs/common';
 import { encrypt, decrypt } from './encryption';
+import type { TenantConnectionConfig } from '../schema-discovery/tenant-database.port';
 
 export const PRISMA_CLIENT = 'PRISMA_CLIENT';
 
@@ -36,6 +37,17 @@ export class ConnectionsService {
       username: saved.username,
       createdAt: saved.createdAt,
       updatedAt: saved.updatedAt,
+    };
+  }
+
+  async getTenantConnectionConfig(connectionId: string): Promise<TenantConnectionConfig> {
+    const conn = await this.findOne(connectionId);
+    return {
+      host: conn.host,
+      port: conn.port,
+      database: conn.databaseName,
+      username: conn.username,
+      password: conn.password,
     };
   }
 
