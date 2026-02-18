@@ -71,6 +71,9 @@ describe('App Integration', () => {
   beforeEach(() => {
     localStorage.setItem('connectionId', 'conn-1');
     vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string, options?: any) => {
+      if (url.includes('/api/schema/') && url.includes('/rows')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ rows: [], totalRows: 0, page: 1, pageSize: 25, primaryKeyColumns: [] }) });
+      }
       if (url.includes('/api/schema/')) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve(mockTables) });
       }

@@ -1,9 +1,13 @@
-import { Controller, Post, Get, Body, Param } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, Query } from '@nestjs/common';
 import { SchemaDiscoveryService } from './schema-discovery.service';
+import { TableRowsService } from './table-rows.service';
 
 @Controller('schema')
 export class SchemaController {
-  constructor(private readonly schemaDiscoveryService: SchemaDiscoveryService) {}
+  constructor(
+    private readonly schemaDiscoveryService: SchemaDiscoveryService,
+    private readonly tableRowsService: TableRowsService,
+  ) {}
 
   @Get('discover/status')
   getDiscoveryStatus() {
@@ -18,5 +22,16 @@ export class SchemaController {
   @Get(':connectionId/tables')
   getDiscoveredTables(@Param('connectionId') connectionId: string) {
     return this.schemaDiscoveryService.getDiscoveredTables(connectionId);
+  }
+
+  @Get(':connectionId/tables/:schemaName/:tableName/rows')
+  getTableRows(
+    @Param('connectionId') connectionId: string,
+    @Param('schemaName') schemaName: string,
+    @Param('tableName') tableName: string,
+    @Query('page') page?: string,
+  ) {
+    const pageNumber = page ? parseInt(page, 10) : 1;
+    return this.tableRowsService.fetchRows(connectionId, schemaName, tableName, pageNumber);
   }
 }

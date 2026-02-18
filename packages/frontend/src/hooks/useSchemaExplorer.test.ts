@@ -22,7 +22,7 @@ const mockTables: DiscoveredTable[] = [
 ];
 
 function createMockPort(tables: DiscoveredTable[] = mockTables): SchemaDataPort {
-  return { fetchTables: vi.fn().mockResolvedValue(tables) };
+  return { fetchTables: vi.fn().mockResolvedValue(tables), fetchTableRows: vi.fn() };
 }
 
 describe('useSchemaExplorer', () => {
@@ -51,14 +51,14 @@ describe('useSchemaExplorer', () => {
   });
 
   it('exposes isLoading=true while fetching', () => {
-    const port = { fetchTables: vi.fn().mockReturnValue(new Promise(() => {})) };
+    const port = { fetchTables: vi.fn().mockReturnValue(new Promise(() => {})), fetchTableRows: vi.fn() };
     const { result } = renderHook(() => useSchemaExplorer(port, 'conn-1'));
 
     expect(result.current.isLoading).toBe(true);
   });
 
   it('exposes error when fetch fails', async () => {
-    const port = { fetchTables: vi.fn().mockRejectedValue(new Error('Network error')) };
+    const port = { fetchTables: vi.fn().mockRejectedValue(new Error('Network error')), fetchTableRows: vi.fn() };
     const { result } = renderHook(() => useSchemaExplorer(port, 'conn-1'));
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));

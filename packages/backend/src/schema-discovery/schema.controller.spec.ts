@@ -1,12 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { SchemaController } from './schema.controller';
 import { SchemaDiscoveryService } from './schema-discovery.service';
+import { TableRowsService } from './table-rows.service';
 
 const mockService = {
   analyzeSchemas: vi.fn(),
   getDiscoveredTables: vi.fn(),
   getDiscoveryStatus: vi.fn(),
+};
+
+const mockTableRowsService = {
+  fetchRows: vi.fn(),
 };
 
 describe('SchemaController', () => {
@@ -16,7 +22,10 @@ describe('SchemaController', () => {
     vi.clearAllMocks();
     const module: TestingModule = await Test.createTestingModule({
       controllers: [SchemaController],
-      providers: [{ provide: SchemaDiscoveryService, useValue: mockService }],
+      providers: [
+        { provide: SchemaDiscoveryService, useValue: mockService },
+        { provide: TableRowsService, useValue: mockTableRowsService },
+      ],
     }).compile();
 
     controller = module.get<SchemaController>(SchemaController);
@@ -39,6 +48,42 @@ describe('SchemaController', () => {
 
     expect(mockService.getDiscoveredTables).toHaveBeenCalledWith('conn-id');
     expect(result).toEqual(metadata);
+  });
+
+  it('GET rows delegates to TableRowsService and returns result', async () => {
+    const cannedResult = {
+      rows: [{ id: 1, name: 'Alice' }],
+      totalRows: 42,
+      page: 2,
+      pageSize: 25,
+      primaryKeyColumns: ['id'],
+    };
+    mockTableRowsService.fetchRows.mockResolvedValue(cannedResult);
+
+    const result = await controller.getTableRows('conn-id', 'public', 'users', '2');
+
+    expect(mockTableRowsService.fetchRows).toHaveBeenCalledWith('conn-id', 'public', 'users', 2);
+    expect(result).toEqual(cannedResult);
+  });
+
+  it('GET rows defaults to page 1 when query param is omitted', async () => {
+    mockTableRowsService.fetchRows.mockResolvedValue({ rows: [], totalRows: 0, page: 1, pageSize: 25, primaryKeyColumns: [] });
+
+    await controller.getTableRows('conn-id', 'public', 'users', undefined as unknown as string);
+
+    expect(mockTableRowsService.fetchRows).toHaveBeenCalledWith('conn-id', 'public', 'users', 1);
+  });
+
+  it('GET rows returns 400 when page is less than 1', async () => {
+    mockTableRowsService.fetchRows.mockRejectedValue(new BadRequestException('Page must be >= 1'));
+
+    await expect(controller.getTableRows('conn-id', 'public', 'users', '0')).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('GET rows returns 404 when connection does not exist', async () => {
+    mockTableRowsService.fetchRows.mockRejectedValue(new NotFoundException('Connection not found'));
+
+    await expect(controller.getTableRows('conn-id', 'public', 'users', '1')).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('GET /schema/discover/status returns current analysis progress', () => {

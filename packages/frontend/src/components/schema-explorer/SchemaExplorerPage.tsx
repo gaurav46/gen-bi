@@ -1,7 +1,9 @@
 import { useSchemaExplorer } from '../../hooks/useSchemaExplorer';
+import { useTableRows } from '../../hooks/useTableRows';
 import type { SchemaDataPort } from '../../ports/schema-data-port';
 import { TableListPanel } from './TableListPanel';
 import { ColumnDetailPanel } from './ColumnDetailPanel';
+import { DataPreviewPanel } from './DataPreviewPanel';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 
@@ -21,6 +23,11 @@ export function SchemaExplorerPage({ port }: SchemaExplorerPageProps) {
     setSelectedTable,
     refetch,
   } = useSchemaExplorer(port, connectionId);
+
+  const tableRef = selectedTable
+    ? { connectionId: selectedTable.connectionId, schemaName: selectedTable.schemaName, tableName: selectedTable.tableName }
+    : null;
+  const tableRows = useTableRows(port, tableRef);
 
   if (!connectionId) {
     return (
@@ -77,7 +84,21 @@ export function SchemaExplorerPage({ port }: SchemaExplorerPageProps) {
       />
       <div className="flex-1 overflow-auto">
         {selectedTable ? (
-          <ColumnDetailPanel table={selectedTable} />
+          <>
+            <ColumnDetailPanel table={selectedTable} />
+            <DataPreviewPanel
+              rows={tableRows.rows}
+              columns={selectedTable.columns.map((c) => c.columnName)}
+              totalRows={tableRows.totalRows}
+              page={tableRows.page}
+              pageSize={tableRows.pageSize}
+              isLoading={tableRows.isLoading}
+              error={tableRows.error}
+              onNextPage={tableRows.goToNextPage}
+              onPreviousPage={tableRows.goToPreviousPage}
+              onRetry={tableRows.retry}
+            />
+          </>
         ) : (
           <div className="flex items-center justify-center h-full">
             <p className="text-sm text-muted-foreground">Select a table to view its columns</p>
