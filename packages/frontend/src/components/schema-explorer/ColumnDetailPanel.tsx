@@ -15,7 +15,6 @@ export function ColumnDetailPanel({ table }: { table: DiscoveredTable }) {
 
   return (
     <div className="p-3">
-      <h2 className="text-lg font-semibold mb-3">{table.tableName}</h2>
       <Table>
         <TableHeader>
           <TableRow className="bg-muted/50">

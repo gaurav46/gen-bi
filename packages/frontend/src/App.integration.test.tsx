@@ -129,7 +129,11 @@ describe('App Integration', () => {
 
     await userEvent.click(screen.getByText('orders'));
 
-    expect(screen.getByText('user_id')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /^Schema$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('user_id')).toBeInTheDocument();
+    });
     expect(screen.getByText('numeric')).toBeInTheDocument();
     expect(screen.getByText('users.id')).toBeInTheDocument();
     expect(screen.getByText('PK')).toBeInTheDocument();
