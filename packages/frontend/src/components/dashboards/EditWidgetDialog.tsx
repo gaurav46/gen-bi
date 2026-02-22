@@ -16,9 +16,10 @@ type EditWidgetDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSave: (dto: UpdateWidgetRequest) => void;
+  error?: string | null;
 };
 
-export function EditWidgetDialog({ widget, open, onOpenChange, onSave }: EditWidgetDialogProps) {
+export function EditWidgetDialog({ widget, open, onOpenChange, onSave, error }: EditWidgetDialogProps) {
   const [title, setTitle] = useState(widget.title);
   const [legendLabels, setLegendLabels] = useState<Record<string, string>>({});
 
@@ -69,6 +70,7 @@ export function EditWidgetDialog({ widget, open, onOpenChange, onSave }: EditWid
             </div>
           ))}
         </div>
+        {error && <p className="text-sm text-destructive">{error}</p>}
         <DialogFooter>
           <Button variant="outline" onClick={handleCancel}>Cancel</Button>
           <Button onClick={handleSave}>Save</Button>

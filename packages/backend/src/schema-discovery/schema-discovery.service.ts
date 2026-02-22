@@ -1,9 +1,12 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConnectionsService, PRISMA_CLIENT } from '../connections/connections.service';
 import type { TenantDatabasePort } from './tenant-database.port';
 import type { EmbeddingPort } from './embedding.port';
 import { EMBEDDING_PORT } from './embedding.port';
+import type { DescriptionSuggestionPort } from './description-suggestion.port';
+import { DESCRIPTION_SUGGESTION_PORT } from './description-suggestion.port';
 import { buildEmbeddingInputs } from './embedding-input';
+import { isAmbiguousColumnName } from './ambiguity';
 
 export const TENANT_DATABASE_PORT = 'TENANT_DATABASE_PORT';
 const SYSTEM_SCHEMA_NAMES = new Set(['information_schema', 'pg_catalog', 'pg_toast']);
@@ -18,6 +21,7 @@ export class SchemaDiscoveryService {
     @Inject(TENANT_DATABASE_PORT) private readonly tenantDatabasePort: TenantDatabasePort,
     @Inject(PRISMA_CLIENT) private readonly prisma: any,
     @Inject(EMBEDDING_PORT) private readonly embeddingPort: EmbeddingPort,
+    @Optional() @Inject(DESCRIPTION_SUGGESTION_PORT) private readonly descriptionPort?: DescriptionSuggestionPort,
   ) {}
 
   getDiscoveryStatus() {
@@ -132,27 +136,7 @@ export class SchemaDiscoveryService {
         });
       }
 
-      const allColumns = columnsResult.rows.map((c) => ({
-        tableName: c.table_name as string,
-        columnName: c.column_name as string,
-        dataType: c.data_type as string,
-      }));
-
-      if (allColumns.length > 0) {
-        this.progress = { status: 'analyzing', current, total: tablesResult.rows.length, message: 'Generating embeddings...' };
-
-        const inputs = buildEmbeddingInputs(allColumns);
-        const embeddings = await this.embeddingPort.generateEmbeddings(inputs);
-
-        await this.prisma.$executeRaw`DELETE FROM column_embeddings WHERE connection_id = ${connectionId}`;
-
-        for (let i = 0; i < allColumns.length; i++) {
-          const vectorStr = `[${embeddings[i].join(',')}]`;
-          await this.prisma.$executeRaw`INSERT INTO column_embeddings (id, connection_id, table_id, column_id, input_text, embedding, created_at) VALUES (gen_random_uuid(), ${connectionId}, ${allColumns[i].tableName}, ${allColumns[i].columnName}, ${inputs[i]}, ${vectorStr}::vector, now())`;
-        }
-      }
-
-      this.progress = { status: 'done', current, total: tablesResult.rows.length, message: 'Analysis complete' };
+      this.progress = { status: 'introspected', current, total: tablesResult.rows.length, message: 'Introspection complete' };
       this.logger.log(`Schema analysis complete for connection ${connectionId}: ${tablesResult.rows.length} tables discovered`);
       return { tablesDiscovered: tablesResult.rows.length };
     } catch (error) {
@@ -162,6 +146,119 @@ export class SchemaDiscoveryService {
     } finally {
       await this.tenantDatabasePort.disconnect();
     }
+  }
+
+  async getAnnotations(connectionId: string) {
+    const tables = await this.prisma.discoveredTable.findMany({
+      where: { connectionId },
+      include: { columns: true },
+    });
+
+    const ambiguousColumns: {
+      columnId: string;
+      tableName: string;
+      schemaName: string;
+      columnName: string;
+      dataType: string;
+      neighborColumns: string[];
+    }[] = [];
+
+    for (const table of tables) {
+      const allColumnNames = table.columns.map((c: any) => c.columnName as string);
+      for (const col of table.columns) {
+        if (isAmbiguousColumnName(col.columnName)) {
+          ambiguousColumns.push({
+            columnId: col.id,
+            tableName: table.tableName,
+            schemaName: table.schemaName,
+            columnName: col.columnName,
+            dataType: col.dataType,
+            neighborColumns: allColumnNames.filter((n: string) => n !== col.columnName),
+          });
+        }
+      }
+    }
+
+    let suggestions: Map<string, string> = new Map();
+    if (ambiguousColumns.length > 0 && this.descriptionPort) {
+      try {
+        const results = await this.descriptionPort.suggestDescriptions(
+          ambiguousColumns.map((c) => ({
+            tableName: c.tableName,
+            columnName: c.columnName,
+            dataType: c.dataType,
+            neighborColumns: c.neighborColumns,
+          })),
+        );
+        for (const r of results) {
+          suggestions.set(`${r.tableName}.${r.columnName}`, r.description);
+        }
+      } catch {
+        this.logger.warn('AI description suggestion failed, returning null suggestions');
+      }
+    }
+
+    return {
+      columns: ambiguousColumns.map((c) => ({
+        columnId: c.columnId,
+        tableName: c.tableName,
+        schemaName: c.schemaName,
+        columnName: c.columnName,
+        dataType: c.dataType,
+        suggestedDescription: suggestions.get(`${c.tableName}.${c.columnName}`) ?? null,
+      })),
+    };
+  }
+
+  async embedColumns(connectionId: string) {
+    if (this.progress.status === 'analyzing') {
+      throw new Error('Embedding already in progress');
+    }
+
+    this.progress = { status: 'analyzing', current: 0, total: 0, message: 'Generating embeddings...' };
+
+    try {
+      const tables = await this.prisma.discoveredTable.findMany({
+        where: { connectionId },
+        include: { columns: true },
+      });
+
+      const allColumns = tables.flatMap((table: any) =>
+        table.columns.map((col: any) => ({
+          tableId: table.id,
+          columnId: col.id,
+          tableName: table.tableName,
+          columnName: col.columnName,
+          dataType: col.dataType,
+          description: col.description ?? undefined,
+        })),
+      );
+
+      const inputs = buildEmbeddingInputs(allColumns);
+      const embeddings = await this.embeddingPort.generateEmbeddings(inputs);
+
+      await this.prisma.$executeRaw`DELETE FROM column_embeddings WHERE connection_id = ${connectionId}`;
+      for (let i = 0; i < inputs.length; i++) {
+        const vector = `[${embeddings[i].join(',')}]`;
+        await this.prisma.$executeRaw`INSERT INTO column_embeddings (id, connection_id, table_id, column_id, input_text, embedding, created_at) VALUES (gen_random_uuid(), ${connectionId}, ${allColumns[i].tableId}, ${allColumns[i].columnId}, ${inputs[i]}, ${vector}::vector, now())`;
+      }
+
+      this.progress = { status: 'done', current: allColumns.length, total: allColumns.length, message: 'Analysis complete' };
+    } catch (error) {
+      this.logger.error(`Embedding failed for connection ${connectionId}: ${error}`);
+      this.progress = { status: 'error', current: 0, total: 0, message: String(error) };
+      throw error;
+    }
+  }
+
+  async saveAnnotations(connectionId: string, annotations: { columnId: string; description: string }[]) {
+    for (const annotation of annotations) {
+      await this.prisma.discoveredColumn.update({
+        where: { id: annotation.columnId },
+        data: { description: annotation.description },
+      });
+    }
+    return { updated: annotations.length };
   }
 
   async testConnection(connectionId: string) {

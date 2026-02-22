@@ -9,6 +9,9 @@ const mockService = {
   analyzeSchemas: vi.fn(),
   getDiscoveredTables: vi.fn(),
   getDiscoveryStatus: vi.fn(),
+  getAnnotations: vi.fn(),
+  saveAnnotations: vi.fn(),
+  embedColumns: vi.fn(),
 };
 
 const mockTableRowsService = {
@@ -86,6 +89,18 @@ describe('SchemaController', () => {
     await expect(controller.getTableRows('conn-id', 'public', 'users', '1')).rejects.toBeInstanceOf(NotFoundException);
   });
 
+  it('GET /schema/:connectionId/annotations delegates to service', async () => {
+    const cannedAnnotations = {
+      columns: [{ columnId: 'col-1', tableName: 'orders', columnName: 'amt_1', suggestedDescription: 'Amount' }],
+    };
+    mockService.getAnnotations.mockResolvedValue(cannedAnnotations);
+
+    const result = await controller.getAnnotations('conn-id');
+
+    expect(mockService.getAnnotations).toHaveBeenCalledWith('conn-id');
+    expect(result).toEqual(cannedAnnotations);
+  });
+
   it('GET /schema/discover/status returns current analysis progress', () => {
     const progress = { status: 'analyzing', current: 3, total: 12, message: 'Analyzing table 3 of 12' };
     mockService.getDiscoveryStatus.mockReturnValue(progress);
@@ -94,5 +109,27 @@ describe('SchemaController', () => {
 
     expect(mockService.getDiscoveryStatus).toHaveBeenCalled();
     expect(result).toEqual(progress);
+  });
+
+  it('PATCH /schema/:connectionId/annotations delegates to service', async () => {
+    mockService.saveAnnotations.mockResolvedValue({ updated: 1 });
+
+    const result = await controller.saveAnnotations('conn-id', {
+      annotations: [{ columnId: 'col-1', description: 'Order subtotal' }],
+    });
+
+    expect(mockService.saveAnnotations).toHaveBeenCalledWith('conn-id', [
+      { columnId: 'col-1', description: 'Order subtotal' },
+    ]);
+    expect(result).toEqual({ updated: 1 });
+  });
+
+  it('POST /schema/:connectionId/embed delegates to service', async () => {
+    mockService.embedColumns.mockResolvedValue(undefined);
+
+    const result = await controller.embed('conn-id');
+
+    expect(mockService.embedColumns).toHaveBeenCalledWith('conn-id');
+    expect(result).toEqual({ status: 'started' });
   });
 });

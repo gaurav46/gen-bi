@@ -24,6 +24,7 @@ export function DashboardDetailPage({ dashboardPort }: DashboardDetailPageProps)
   const [dashboardName, setDashboardName] = useState('');
   const [widgetStates, setWidgetStates] = useState<WidgetState[]>([]);
   const [editingWidget, setEditingWidget] = useState<Widget | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!dashboardId) return;
@@ -59,11 +60,16 @@ export function DashboardDetailPage({ dashboardPort }: DashboardDetailPageProps)
 
   async function handleUpdate(dto: UpdateWidgetRequest) {
     if (!dashboardId || !editingWidget) return;
-    const updated = await dashboardPort.updateWidget(dashboardId, editingWidget.id, dto);
-    setWidgetStates((prev) =>
-      prev.map((s) => (s.widget.id === updated.id ? { ...s, widget: updated } : s)),
-    );
-    setEditingWidget(null);
+    setSaveError(null);
+    try {
+      const updated = await dashboardPort.updateWidget(dashboardId, editingWidget.id, dto);
+      setWidgetStates((prev) =>
+        prev.map((s) => (s.widget.id === updated.id ? { ...s, widget: updated } : s)),
+      );
+      setEditingWidget(null);
+    } catch (err: any) {
+      setSaveError(err.message || 'Failed to save widget');
+    }
   }
 
   return (
@@ -117,8 +123,9 @@ export function DashboardDetailPage({ dashboardPort }: DashboardDetailPageProps)
         <EditWidgetDialog
           widget={editingWidget}
           open={!!editingWidget}
-          onOpenChange={(open) => { if (!open) setEditingWidget(null); }}
+          onOpenChange={(open) => { if (!open) { setEditingWidget(null); setSaveError(null); } }}
           onSave={handleUpdate}
+          error={saveError}
         />
       )}
     </div>

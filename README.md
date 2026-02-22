@@ -2,16 +2,17 @@
 
 **Ask questions about your data in plain English. Get answers instantly.**
 
-Gen BI is an open-source business intelligence tool that connects to your PostgreSQL database and lets you query it using natural language. Built by [Incubyte](https://incubyte.co) to reduce dependency on expensive SaaS BI tools.
+Gen BI is an open-source business intelligence tool that connects to your PostgreSQL database and lets you query it using natural language. Built by [Incubyte](https://incubyte.co) as a production-grade implementation of Anthropic's [Text-to-SQL cookbook](https://github.com/anthropics/claude-cookbooks/blob/main/capabilities/text_to_sql/guide.ipynb).
 
-Instead of writing SQL or learning yet another dashboard builder, just ask: *"Show me the top 5 customers by revenue"* — and get a table of results in seconds.
+Instead of writing SQL or learning yet another dashboard builder, just ask: *"Show me the top 5 customers by revenue"* — and get a chart or table of results in seconds.
 
 ## How It Works
 
 1. **Connect** — Point Gen BI at any PostgreSQL database
-2. **Analyze** — The system discovers your schema and generates vector embeddings for every column
+2. **Analyze** — The system discovers your schema, flags ambiguous column names for annotation, and generates vector embeddings
 3. **Ask** — Type a question in plain English in the Workspace
-4. **Answer** — Gen BI retrieves relevant schema via RAG, generates SQL through Claude, validates it, executes it, and displays results
+4. **Visualize** — Gen BI retrieves relevant schema via RAG, generates SQL through Claude, validates and executes it, and displays results as charts or tables
+5. **Save** — Pin useful queries to dashboards for repeated use
 
 The generated SQL is always visible in a collapsible section for full transparency. If the first attempt fails, a self-correcting retry loop feeds errors back to Claude for up to 3 attempts.
 
@@ -44,7 +45,7 @@ The generated SQL is always visible in a collapsible section for full transparen
 
 | Layer | Technology |
 |-------|-----------|
-| Frontend | React 19, Vite 7, TypeScript, Tailwind v4, shadcn/ui, Radix UI |
+| Frontend | React 19, Vite 7, TypeScript, Tailwind v4, shadcn/ui, Recharts |
 | Backend | NestJS 11, TypeScript, Prisma 7, pg (libpq) |
 | AI | Claude (Anthropic SDK), OpenAI Embeddings |
 | Database | PostgreSQL with pgvector extension |
@@ -91,8 +92,8 @@ pnpm --filter frontend dev        # Frontend on :5173
 ### Running Tests
 
 ```bash
-pnpm --filter backend test    # Backend tests (59 tests)
-pnpm --filter frontend test   # Frontend tests (104 tests)
+pnpm --filter backend test    # Backend tests
+pnpm --filter frontend test   # Frontend tests
 ```
 
 ## Project Structure
@@ -103,7 +104,7 @@ gen-bi/
 │   ├── backend/
 │   │   ├── src/
 │   │   │   ├── connections/      # DB connection management
-│   │   │   ├── schema-discovery/ # Schema analysis + embedding generation
+│   │   │   ├── schema-discovery/ # Schema analysis, annotation, embedding generation
 │   │   │   └── query/            # NL→SQL pipeline (LLM, validation, execution, retry)
 │   │   └── prisma/               # Schema + migrations
 │   └── frontend/
@@ -115,9 +116,10 @@ gen-bi/
 │           └── components/       # UI components
 │               ├── ui/           # shadcn/ui primitives
 │               ├── app-shell/    # Layout, sidebar, navigation
-│               ├── settings-form/# Connection + settings
-│               ├── schema-explorer/ # Browse discovered tables
-│               └── workspace/    # Ask questions, view results
+│               ├── settings-form/# Connection, schema annotation, embedding
+│               ├── schema-explorer/ # Browse discovered tables + data preview
+│               ├── dashboards/   # Saved dashboards + widget management
+│               └── workspace/    # Ask questions, view results + charts
 └── docs/specs/                   # Phase specs + TDD plans
 ```
 
@@ -125,14 +127,14 @@ gen-bi/
 
 - [x] **Phase 1** — Connect & Discover (schema analysis, embeddings, schema explorer)
 - [x] **Phase 2** — Ask & Answer (NL→SQL, validation, execution, retry loop, results table)
-- [ ] **Phase 3** — Visualize (charts beyond tables)
-- [ ] **Phase 4** — Pin & Save (saved queries, dashboards)
-- [ ] **Phase 5** — Schema Intelligence (business-friendly descriptions, query tweaking)
+- [x] **Phase 3** — Visualize (chart type selection, Recharts integration)
+- [x] **Phase 4** — Dashboards (save queries as widgets, dashboard CRUD, widget editing)
+- [ ] **Phase 5** — Schema Intelligence (ambiguity detection, AI-suggested column descriptions, annotation workflow)
 
 ## License
 
-This project is open source. See the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
 ---
 
-Built with care by [Incubyte](https://incubyte.co)
+Built with care by [Incubyte](https://incubyte.co) | Inspired by Anthropic's [Text-to-SQL cookbook](https://github.com/anthropics/claude-cookbooks/blob/main/capabilities/text_to_sql/guide.ipynb)

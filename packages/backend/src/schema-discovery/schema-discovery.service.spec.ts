@@ -3,6 +3,7 @@ import { NotFoundException } from '@nestjs/common';
 import { SchemaDiscoveryService } from './schema-discovery.service';
 import type { TenantDatabasePort } from './tenant-database.port';
 import type { EmbeddingPort } from './embedding.port';
+import type { DescriptionSuggestionPort } from './description-suggestion.port';
 import { ConnectionsService } from '../connections/connections.service';
 
 const defaultTenantConfig = {
@@ -19,6 +20,7 @@ describe('SchemaDiscoveryService', () => {
   let tenantDatabasePort: TenantDatabasePort;
   let mockPrisma: Record<string, any>;
   let mockEmbeddingPort: EmbeddingPort;
+  let mockDescriptionPort: DescriptionSuggestionPort;
 
   beforeEach(() => {
     connectionsService = {
@@ -46,11 +48,16 @@ describe('SchemaDiscoveryService', () => {
       ),
     };
 
+    mockDescriptionPort = {
+      suggestDescriptions: vi.fn().mockResolvedValue([]),
+    };
+
     service = new SchemaDiscoveryService(
       connectionsService as ConnectionsService,
       tenantDatabasePort,
       mockPrisma,
       mockEmbeddingPort,
+      mockDescriptionPort,
     );
   });
 
@@ -282,7 +289,7 @@ describe('SchemaDiscoveryService', () => {
     await service.analyzeSchemas('conn-id', ['public']);
 
     const status = service.getDiscoveryStatus();
-    expect(status).toEqual({ status: 'done', current: 3, total: 3, message: 'Analysis complete' });
+    expect(status).toEqual({ status: 'introspected', current: 3, total: 3, message: 'Introspection complete' });
   });
 
   it('getDiscoveredTables returns stored metadata with relations', async () => {
@@ -365,81 +372,57 @@ describe('SchemaDiscoveryService', () => {
     expect(tablesCall![1]).toContain("'; DROP TABLE users; --");
   });
 
-  it('analyzeSchemas generates embeddings for discovered columns after metadata persistence', async () => {
-    vi.mocked(connectionsService.getTenantConnectionConfig).mockResolvedValue(defaultTenantConfig);
-    vi.mocked(tenantDatabasePort.query).mockImplementation(async (sql: string) => {
-      if (sql.includes('information_schema.tables')) {
-        return { rows: [{ table_schema: 'public', table_name: 'users' }] };
-      }
-      if (sql.includes('information_schema.columns')) {
-        return { rows: [
-          { table_schema: 'public', table_name: 'users', column_name: 'id', data_type: 'uuid', is_nullable: 'NO', ordinal_position: 1 },
-          { table_schema: 'public', table_name: 'users', column_name: 'email', data_type: 'varchar', is_nullable: 'YES', ordinal_position: 2 },
-        ]};
-      }
-      return { rows: [] };
-    });
-    vi.mocked(mockEmbeddingPort.generateEmbeddings).mockResolvedValue([[0.1, 0.2], [0.3, 0.4]]);
-
-    await service.analyzeSchemas('conn-id', ['public']);
-
-    expect(mockEmbeddingPort.generateEmbeddings).toHaveBeenCalledWith([
-      'users.id uuid',
-      'users.email varchar',
+  it('getAnnotations returns ambiguous columns with AI-suggested descriptions', async () => {
+    mockPrisma.discoveredTable.findMany.mockResolvedValue([
+      {
+        id: 'table-1',
+        tableName: 'orders',
+        schemaName: 'public',
+        columns: [
+          { id: 'col-1', columnName: 'amt_1', dataType: 'numeric', description: null },
+          { id: 'col-2', columnName: 'email', dataType: 'varchar', description: null },
+        ],
+      },
     ]);
-    expect(mockPrisma.$executeRaw).toHaveBeenCalled();
+
+    vi.mocked(mockDescriptionPort.suggestDescriptions).mockResolvedValue([
+      { columnName: 'amt_1', tableName: 'orders', description: 'Order subtotal amount' },
+    ]);
+
+    const result = await service.getAnnotations('conn-id');
+
+    expect(result.columns).toHaveLength(1);
+    expect(result.columns[0]).toEqual(
+      expect.objectContaining({
+        columnId: 'col-1',
+        columnName: 'amt_1',
+        tableName: 'orders',
+        suggestedDescription: 'Order subtotal amount',
+      }),
+    );
   });
 
-  it('analyzeSchemas updates progress to Generating embeddings during embedding step', async () => {
-    vi.mocked(connectionsService.getTenantConnectionConfig).mockResolvedValue(defaultTenantConfig);
-    const progressMessages: string[] = [];
-    vi.mocked(tenantDatabasePort.query).mockImplementation(async (sql: string) => {
-      if (sql.includes('information_schema.tables')) {
-        return { rows: [{ table_schema: 'public', table_name: 'users' }] };
-      }
-      if (sql.includes('information_schema.columns')) {
-        return { rows: [
-          { table_schema: 'public', table_name: 'users', column_name: 'id', data_type: 'uuid', is_nullable: 'NO', ordinal_position: 1 },
-        ]};
-      }
-      return { rows: [] };
-    });
-    vi.mocked(mockEmbeddingPort.generateEmbeddings).mockImplementation(async () => {
-      progressMessages.push(service.getDiscoveryStatus().message);
-      return [[0.1, 0.2]];
-    });
+  it('getAnnotations returns ambiguous columns with null suggestions when AI fails', async () => {
+    mockPrisma.discoveredTable.findMany.mockResolvedValue([
+      {
+        id: 'table-1',
+        tableName: 'orders',
+        schemaName: 'public',
+        columns: [
+          { id: 'col-1', columnName: 'amt_1', dataType: 'numeric', description: null },
+        ],
+      },
+    ]);
 
-    await service.analyzeSchemas('conn-id', ['public']);
+    vi.mocked(mockDescriptionPort.suggestDescriptions).mockRejectedValue(new Error('API error'));
 
-    expect(progressMessages.some((m) => m.includes('Generating embeddings'))).toBe(true);
+    const result = await service.getAnnotations('conn-id');
+
+    expect(result.columns).toHaveLength(1);
+    expect(result.columns[0].suggestedDescription).toBeNull();
   });
 
-  it('analyzeSchemas deletes existing embeddings for connectionId before storing new ones', async () => {
-    vi.mocked(connectionsService.getTenantConnectionConfig).mockResolvedValue(defaultTenantConfig);
-    vi.mocked(tenantDatabasePort.query).mockImplementation(async (sql: string) => {
-      if (sql.includes('information_schema.tables')) {
-        return { rows: [{ table_schema: 'public', table_name: 'users' }] };
-      }
-      if (sql.includes('information_schema.columns')) {
-        return { rows: [
-          { table_schema: 'public', table_name: 'users', column_name: 'id', data_type: 'uuid', is_nullable: 'NO', ordinal_position: 1 },
-        ]};
-      }
-      return { rows: [] };
-    });
-    vi.mocked(mockEmbeddingPort.generateEmbeddings).mockResolvedValue([[0.1, 0.2]]);
-
-    await service.analyzeSchemas('conn-id', ['public']);
-
-    const executeRawCalls = mockPrisma.$executeRaw.mock.calls;
-    const deleteCall = executeRawCalls.find((call: any[]) => {
-      const sql = String(call[0]?.strings?.[0] ?? call[0] ?? '');
-      return sql.includes('DELETE');
-    });
-    expect(deleteCall).toBeDefined();
-  });
-
-  it('analyzeSchemas reports error when embedding generation fails but metadata is preserved', async () => {
+  it('analyzeSchemas does not call embedding port (embedding is a separate step)', async () => {
     vi.mocked(connectionsService.getTenantConnectionConfig).mockResolvedValue(defaultTenantConfig);
     vi.mocked(tenantDatabasePort.query).mockImplementation(async (sql: string) => {
       if (sql.includes('information_schema.tables')) {
@@ -452,24 +435,29 @@ describe('SchemaDiscoveryService', () => {
       }
       return { rows: [] };
     });
-    vi.mocked(mockEmbeddingPort.generateEmbeddings).mockRejectedValue(new Error('OpenAI API unreachable'));
 
-    await expect(service.analyzeSchemas('conn-id', ['public'])).rejects.toThrow('OpenAI API unreachable');
+    await service.analyzeSchemas('conn-id', ['public']);
 
-    expect(mockPrisma.discoveredTable.create).toHaveBeenCalled();
+    expect(mockEmbeddingPort.generateEmbeddings).not.toHaveBeenCalled();
   });
 
-  it('analyzeSchemas skips embedding generation when no columns are discovered', async () => {
+  it('analyzeSchemas sets status to introspected after persistence (no embedding)', async () => {
     vi.mocked(connectionsService.getTenantConnectionConfig).mockResolvedValue(defaultTenantConfig);
     vi.mocked(tenantDatabasePort.query).mockImplementation(async (sql: string) => {
       if (sql.includes('information_schema.tables')) {
-        return { rows: [{ table_schema: 'public', table_name: 'empty_table' }] };
+        return { rows: [{ table_schema: 'public', table_name: 'users' }] };
+      }
+      if (sql.includes('information_schema.columns')) {
+        return { rows: [
+          { table_schema: 'public', table_name: 'users', column_name: 'id', data_type: 'uuid', is_nullable: 'NO', ordinal_position: 1 },
+        ]};
       }
       return { rows: [] };
     });
 
     await service.analyzeSchemas('conn-id', ['public']);
 
+    expect(service.getDiscoveryStatus().status).toBe('introspected');
     expect(mockEmbeddingPort.generateEmbeddings).not.toHaveBeenCalled();
   });
 
@@ -492,6 +480,63 @@ describe('SchemaDiscoveryService', () => {
     await expect(service.analyzeSchemas('conn-id', ['public'])).rejects.toThrow('Analysis already in progress');
 
     resolveQuery!();
+    await first;
+  });
+
+  it('saveAnnotations updates column descriptions in database', async () => {
+    mockPrisma.discoveredColumn = {
+      update: vi.fn().mockResolvedValue({}),
+    };
+
+    await service.saveAnnotations('conn-id', [
+      { columnId: 'col-1', description: 'Order subtotal' },
+    ]);
+
+    expect(mockPrisma.discoveredColumn.update).toHaveBeenCalledWith({
+      where: { id: 'col-1' },
+      data: { description: 'Order subtotal' },
+    });
+  });
+
+  it('embedColumns reads columns with descriptions and generates embeddings', async () => {
+    mockPrisma.discoveredTable.findMany.mockResolvedValue([
+      {
+        id: 'table-1',
+        connectionId: 'conn-id',
+        schemaName: 'public',
+        tableName: 'orders',
+        columns: [
+          { id: 'col-1', columnName: 'amt_1', dataType: 'numeric', description: 'Order subtotal amount' },
+          { id: 'col-2', columnName: 'email', dataType: 'varchar', description: null },
+        ],
+      },
+    ]);
+
+    await service.embedColumns('conn-id');
+
+    expect(mockEmbeddingPort.generateEmbeddings).toHaveBeenCalledWith([
+      'orders.amt_1 numeric -- Order subtotal amount',
+      'orders.email varchar',
+    ]);
+
+    expect(mockPrisma.$executeRaw).toHaveBeenCalled();
+    expect(service.getDiscoveryStatus().status).toBe('done');
+  });
+
+  it('embedColumns rejects when already embedding', async () => {
+    let resolveFind: () => void;
+    const blockingPromise = new Promise<void>((r) => { resolveFind = r; });
+    mockPrisma.discoveredTable.findMany.mockImplementation(async () => {
+      await blockingPromise;
+      return [{ id: 'table-1', connectionId: 'conn-id', schemaName: 'public', tableName: 'orders', columns: [] }];
+    });
+
+    const first = service.embedColumns('conn-id');
+    await new Promise((r) => setTimeout(r, 10));
+
+    await expect(service.embedColumns('conn-id')).rejects.toThrow('Embedding already in progress');
+
+    resolveFind!();
     await first;
   });
 });

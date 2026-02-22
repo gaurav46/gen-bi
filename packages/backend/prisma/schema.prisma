@@ -41,6 +41,7 @@ model DiscoveredColumn {
   dataType        String          @map("data_type")
   isNullable      Boolean         @map("is_nullable")
   ordinalPosition Int             @map("ordinal_position")
+  description     String?         @map("description")
   table           DiscoveredTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
 
   @@map("discovered_columns")
