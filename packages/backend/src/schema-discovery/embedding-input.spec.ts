@@ -12,6 +12,28 @@ describe('buildEmbeddingInput', () => {
     expect(result).toBe('users.email varchar');
   });
 
+  it('appends description to embedding input when present', () => {
+    const result = buildEmbeddingInput({
+      tableName: 'orders',
+      columnName: 'amt_1',
+      dataType: 'numeric',
+      description: 'Total order amount in cents',
+    });
+
+    expect(result).toBe('orders.amt_1 numeric -- Total order amount in cents');
+  });
+
+  it('omits description suffix when description is empty string', () => {
+    const result = buildEmbeddingInput({
+      tableName: 'users',
+      columnName: 'email',
+      dataType: 'varchar',
+      description: '',
+    });
+
+    expect(result).toBe('users.email varchar');
+  });
+
   it('builds embedding inputs for multiple columns', () => {
     const columns = [
       { tableName: 'users', columnName: 'id', dataType: 'uuid' },

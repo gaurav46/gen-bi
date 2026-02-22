@@ -193,6 +193,42 @@ describe('DashboardDetailPage', () => {
     });
   });
 
+  it('shows error in dialog when save fails', async () => {
+    const port = createMockPort({
+      getDashboard: vi.fn().mockResolvedValue({
+        id: 'd1',
+        name: 'Sales KPIs',
+        widgets: [
+          { id: 'w1', dashboardId: 'd1', title: 'Revenue', sql: 'SELECT 1', chartType: 'bar', columns: [{ name: 'month', type: 'varchar', role: 'dimension' }, { name: 'total', type: 'numeric', role: 'measure' }], position: 0, createdAt: '2025-01-01' },
+        ],
+      }),
+      executeWidget: vi.fn().mockResolvedValue({
+        columns: [{ name: 'month', type: 'varchar', role: 'dimension' }, { name: 'total', type: 'numeric', role: 'measure' }],
+        rows: [{ month: 'Jan', total: 100 }],
+      }),
+      updateWidget: vi.fn().mockRejectedValue(new Error('Failed to update widget: 500 Internal Server Error')),
+    });
+
+    renderWithRoute(port);
+
+    await waitFor(() => {
+      expect(screen.getByText('Revenue')).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: /edit/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: /save/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/failed to update/i)).toBeInTheDocument();
+    });
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
   it('back button navigates to /dashboards', async () => {
     const port = createMockPort();
 

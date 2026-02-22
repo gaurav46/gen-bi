@@ -71,6 +71,9 @@ describe('App Integration', () => {
   beforeEach(() => {
     localStorage.setItem('connectionId', 'conn-1');
     vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string, options?: any) => {
+      if (url.includes('/api/schema/') && url.includes('/rows')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ rows: [], totalRows: 0, page: 1, pageSize: 25, primaryKeyColumns: [] }) });
+      }
       if (url.includes('/api/schema/')) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve(mockTables) });
       }
@@ -126,7 +129,11 @@ describe('App Integration', () => {
 
     await userEvent.click(screen.getByText('orders'));
 
-    expect(screen.getByText('user_id')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /^Schema$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('user_id')).toBeInTheDocument();
+    });
     expect(screen.getByText('numeric')).toBeInTheDocument();
     expect(screen.getByText('users.id')).toBeInTheDocument();
     expect(screen.getByText('PK')).toBeInTheDocument();

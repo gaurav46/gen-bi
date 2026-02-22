@@ -2,23 +2,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ConnectionForm } from './ConnectionForm';
-
-async function fillAllFields(user: ReturnType<typeof userEvent.setup>) {
-  await user.type(screen.getByLabelText(/host/i), 'localhost');
-  await user.type(screen.getByLabelText(/database/i), 'mydb');
-  await user.type(screen.getByLabelText(/username/i), 'admin');
-  await user.type(screen.getByLabelText(/password/i), 'secret');
-}
-
-function deferred<T>() {
-  let resolve: (value: T) => void;
-  let reject: (error: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve: resolve!, reject: reject! };
-}
+import { fillAllFields, deferred } from './test-helpers';
 
 describe('ConnectionForm', () => {
   beforeEach(() => {

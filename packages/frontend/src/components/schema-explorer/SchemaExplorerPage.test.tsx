@@ -27,11 +27,11 @@ const tables: DiscoveredTable[] = [
 ];
 
 function createMockPort(result: DiscoveredTable[] = tables): SchemaDataPort {
-  return { fetchTables: vi.fn().mockResolvedValue(result) };
+  return { fetchTables: vi.fn().mockResolvedValue(result), fetchTableRows: vi.fn().mockResolvedValue({ rows: [], totalRows: 0, page: 1, pageSize: 25, primaryKeyColumns: [] }) };
 }
 
 function createFailingPort(error: string): SchemaDataPort {
-  return { fetchTables: vi.fn().mockRejectedValue(new Error(error)) };
+  return { fetchTables: vi.fn().mockRejectedValue(new Error(error)), fetchTableRows: vi.fn() };
 }
 
 describe('SchemaExplorerPage', () => {
@@ -39,7 +39,7 @@ describe('SchemaExplorerPage', () => {
     localStorage.setItem('connectionId', 'conn-1');
   });
 
-  it('renders table list and detail panel side by side', async () => {
+  it('renders table list and shows data preview when table selected', async () => {
     render(<SchemaExplorerPage port={createMockPort()} />);
 
     await waitFor(() => {
@@ -48,11 +48,28 @@ describe('SchemaExplorerPage', () => {
     expect(screen.getByText('orders')).toBeInTheDocument();
 
     await userEvent.click(screen.getByText('users'));
-    expect(screen.getByText('email')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /schema/i })).toBeInTheDocument();
+  });
+
+  it('opens schema drawer when Schema button is clicked', async () => {
+    render(<SchemaExplorerPage port={createMockPort()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('users')).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByText('users'));
+    await userEvent.click(screen.getByRole('button', { name: /schema/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('email')).toBeInTheDocument();
+    });
+    expect(screen.getByText('users — Schema')).toBeInTheDocument();
+    expect(screen.getByText('2 columns')).toBeInTheDocument();
   });
 
   it('shows Skeleton loading state while fetching tables', () => {
-    const port: SchemaDataPort = { fetchTables: () => new Promise(() => {}) };
+    const port: SchemaDataPort = { fetchTables: () => new Promise(() => {}), fetchTableRows: vi.fn() };
     render(<SchemaExplorerPage port={port} />);
 
     const skeletons = document.querySelectorAll('[data-slot="skeleton"]');
@@ -91,5 +108,31 @@ describe('SchemaExplorerPage', () => {
     });
 
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+  });
+
+  it('shows data preview grid when table is selected', async () => {
+    const port: SchemaDataPort = {
+      fetchTables: vi.fn().mockResolvedValue(tables),
+      fetchTableRows: vi.fn().mockResolvedValue({
+        rows: [{ id: 1, email: 'alice@example.com' }, { id: 2, email: 'bob@example.com' }],
+        totalRows: 2,
+        page: 1,
+        pageSize: 25,
+        primaryKeyColumns: ['id'],
+      }),
+    };
+    render(<SchemaExplorerPage port={port} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('users')).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByText('users'));
+
+    await waitFor(() => {
+      expect(screen.getByText('alice@example.com')).toBeInTheDocument();
+    });
+    expect(screen.getByText('bob@example.com')).toBeInTheDocument();
+    expect(screen.getByText('2 rows')).toBeInTheDocument();
   });
 });

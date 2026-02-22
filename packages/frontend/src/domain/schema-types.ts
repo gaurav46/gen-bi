@@ -29,6 +29,14 @@ export type DiscoveredTable = {
   indexes: DiscoveredIndex[];
 };
 
+export type TableRowsResponse = {
+  rows: Record<string, unknown>[];
+  totalRows: number;
+  page: number;
+  pageSize: number;
+  primaryKeyColumns: string[];
+};
+
 export type ColumnDisplayInfo = {
   columnName: string;
   dataType: string;

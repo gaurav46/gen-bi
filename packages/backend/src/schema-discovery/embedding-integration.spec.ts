@@ -1,11 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { SchemaDiscoveryService } from './schema-discovery.service';
 import type { TenantDatabasePort } from './tenant-database.port';
 import type { EmbeddingPort } from './embedding.port';
 import { ConnectionsService } from '../connections/connections.service';
 
 describe('Embedding Integration', () => {
-  it('analyzeSchemas discovers metadata then generates and stores embeddings', async () => {
+  it('analyzeSchemas discovers metadata and sets status to introspected (no embedding)', async () => {
     const connectionsService = {
       getTenantConnectionConfig: vi.fn().mockResolvedValue({
         host: 'localhost',
@@ -36,10 +36,7 @@ describe('Embedding Integration', () => {
     };
 
     const embeddingPort: EmbeddingPort = {
-      generateEmbeddings: vi.fn().mockResolvedValue([
-        [0.1, 0.2, 0.3],
-        [0.4, 0.5, 0.6],
-      ]),
+      generateEmbeddings: vi.fn(),
     };
 
     const mockPrisma = {
@@ -51,7 +48,6 @@ describe('Embedding Integration', () => {
       $executeRaw: vi.fn().mockResolvedValue(undefined),
     };
 
-    const progressMessages: string[] = [];
     const service = new SchemaDiscoveryService(
       connectionsService,
       tenantDatabasePort,
@@ -59,35 +55,12 @@ describe('Embedding Integration', () => {
       embeddingPort,
     );
 
-    const originalGetStatus = service.getDiscoveryStatus.bind(service);
-    vi.spyOn(embeddingPort, 'generateEmbeddings').mockImplementation(async (inputs) => {
-      progressMessages.push(service.getDiscoveryStatus().message);
-      return inputs.map(() => [0.1, 0.2, 0.3]);
-    });
-
     await service.analyzeSchemas('conn-id', ['public']);
 
-    expect(embeddingPort.generateEmbeddings).toHaveBeenCalledWith([
-      'users.id uuid',
-      'users.email varchar',
-    ]);
-
-    const executeRawCalls = mockPrisma.$executeRaw.mock.calls;
-    const hasDelete = executeRawCalls.some((call: any[]) => {
-      const sql = String(call[0]?.strings?.[0] ?? call[0] ?? '');
-      return sql.includes('DELETE');
-    });
-    expect(hasDelete).toBe(true);
-
-    const hasInsert = executeRawCalls.some((call: any[]) => {
-      const sql = String(call[0]?.strings?.[0] ?? call[0] ?? '');
-      return sql.includes('INSERT');
-    });
-    expect(hasInsert).toBe(true);
+    expect(mockPrisma.discoveredTable.create).toHaveBeenCalled();
+    expect(embeddingPort.generateEmbeddings).not.toHaveBeenCalled();
 
     const finalStatus = service.getDiscoveryStatus();
-    expect(finalStatus).toEqual({ status: 'done', current: 1, total: 1, message: 'Analysis complete' });
-
-    expect(progressMessages.some((m) => m.includes('Generating embeddings'))).toBe(true);
+    expect(finalStatus.status).toBe('introspected');
   });
 });

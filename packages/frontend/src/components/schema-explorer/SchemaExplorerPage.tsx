@@ -1,9 +1,20 @@
+import { useState } from 'react';
+import { Columns3 } from 'lucide-react';
 import { useSchemaExplorer } from '../../hooks/useSchemaExplorer';
+import { useTableRows } from '../../hooks/useTableRows';
 import type { SchemaDataPort } from '../../ports/schema-data-port';
 import { TableListPanel } from './TableListPanel';
 import { ColumnDetailPanel } from './ColumnDetailPanel';
+import { DataPreviewPanel } from './DataPreviewPanel';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from '@/components/ui/sheet';
 
 type SchemaExplorerPageProps = {
   port: SchemaDataPort;
@@ -11,6 +22,7 @@ type SchemaExplorerPageProps = {
 
 export function SchemaExplorerPage({ port }: SchemaExplorerPageProps) {
   const connectionId = localStorage.getItem('connectionId');
+  const [schemaOpen, setSchemaOpen] = useState(false);
   const {
     filteredTables,
     isLoading,
@@ -21,6 +33,11 @@ export function SchemaExplorerPage({ port }: SchemaExplorerPageProps) {
     setSelectedTable,
     refetch,
   } = useSchemaExplorer(port, connectionId);
+
+  const tableRef = selectedTable
+    ? { connectionId: selectedTable.connectionId, schemaName: selectedTable.schemaName, tableName: selectedTable.tableName }
+    : null;
+  const tableRows = useTableRows(port, tableRef);
 
   if (!connectionId) {
     return (
@@ -77,10 +94,47 @@ export function SchemaExplorerPage({ port }: SchemaExplorerPageProps) {
       />
       <div className="flex-1 overflow-auto">
         {selectedTable ? (
-          <ColumnDetailPanel table={selectedTable} />
+          <>
+            <div className="flex items-center justify-between px-3 py-2 border-b border-border">
+              <h2 className="text-lg font-semibold">{selectedTable.tableName}</h2>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setSchemaOpen(true)}
+              >
+                <Columns3 className="size-4 mr-1.5" />
+                Schema
+              </Button>
+            </div>
+            <DataPreviewPanel
+              rows={tableRows.rows}
+              columns={selectedTable.columns.map((c) => c.columnName)}
+              totalRows={tableRows.totalRows}
+              page={tableRows.page}
+              pageSize={tableRows.pageSize}
+              isLoading={tableRows.isLoading}
+              error={tableRows.error}
+              onNextPage={tableRows.goToNextPage}
+              onPreviousPage={tableRows.goToPreviousPage}
+              onRetry={tableRows.retry}
+            />
+            <Sheet open={schemaOpen} onOpenChange={setSchemaOpen}>
+              <SheetContent side="right" className="sm:max-w-lg">
+                <SheetHeader>
+                  <SheetTitle>{selectedTable.tableName} — Schema</SheetTitle>
+                  <SheetDescription>
+                    {selectedTable.columns.length} columns
+                  </SheetDescription>
+                </SheetHeader>
+                <div className="overflow-auto flex-1">
+                  <ColumnDetailPanel table={selectedTable} />
+                </div>
+              </SheetContent>
+            </Sheet>
+          </>
         ) : (
           <div className="flex items-center justify-center h-full">
-            <p className="text-sm text-muted-foreground">Select a table to view its columns</p>
+            <p className="text-sm text-muted-foreground">Select a table to view its data</p>
           </div>
         )}
       </div>

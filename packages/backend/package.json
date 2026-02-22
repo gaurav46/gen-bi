@@ -18,7 +18,7 @@
     "test:cov": "vitest run --coverage"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.74.0",
+    "@anthropic-ai/sdnk": "^0.74.0",
     "@nestjs/common": "^11.0.1",
     "@nestjs/core": "^11.0.1",
     "@nestjs/platform-express": "^11.0.1",

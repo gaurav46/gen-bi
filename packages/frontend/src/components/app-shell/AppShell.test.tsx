@@ -8,7 +8,7 @@ import type { QueryPort } from '../../ports/query-port';
 import type { DashboardPort } from '../../ports/dashboard-port';
 
 function createMockSchemaPort(): SchemaDataPort {
-  return { fetchTables: vi.fn().mockResolvedValue([]) };
+  return { fetchTables: vi.fn().mockResolvedValue([]), fetchTableRows: vi.fn() };
 }
 
 function createMockQueryPort(): QueryPort {

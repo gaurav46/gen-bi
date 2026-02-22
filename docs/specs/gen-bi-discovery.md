@@ -1,7 +1,7 @@
 # Gen-BI: AI-First Business Intelligence Platform — Discovery
 
 ## Vision
-
+@bee can you drop a layout as wireframe here
 DIY dashboard BI products are outdated. Gen-BI is an AI-first BI platform where users describe what they want in plain language and get back the right query, the right visualization, and a polished dashboard — no SQL, no drag-and-drop chart builders.
 
 Think of it as a human Business Analyst who gathers data, runs reports, picks the best visualization, and shares results — except it's instant and available 24/7.
