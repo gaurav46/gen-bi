@@ -1,3 +1,5 @@
+// Superseded by packages/backend/src/infrastructure/drizzle/schema.ts — retained as reference only
+
 generator client {
   provider = "prisma-client"
   output   = "../generated/prisma"
@@ -14,6 +16,7 @@ model ConnectionConfig {
   databaseName      String   @map("database_name")
   username          String
   encryptedPassword String   @map("encrypted_password")
+  dbType            String   @default("postgresql") @map("db_type")
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")
 

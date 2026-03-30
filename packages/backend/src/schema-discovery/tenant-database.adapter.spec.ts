@@ -33,6 +33,7 @@ describe('TenantDatabaseAdapter', () => {
       database: 'tenant_db',
       username: 'tenant_user',
       password: 'tenant_password',
+      dbType: 'postgresql' as const,
     });
 
     expect(Client).toHaveBeenCalledWith({
@@ -58,6 +59,7 @@ describe('TenantDatabaseAdapter', () => {
       database: 'tenant_db',
       username: 'tenant_user',
       password: 'tenant_password',
+      dbType: 'postgresql' as const,
     });
 
     const result = await adapter.query('SELECT schema_name FROM information_schema.schemata');
@@ -75,6 +77,7 @@ describe('TenantDatabaseAdapter', () => {
       database: 'tenant_db',
       username: 'tenant_user',
       password: 'tenant_password',
+      dbType: 'postgresql' as const,
     });
     await adapter.disconnect();
 
@@ -92,6 +95,7 @@ describe('TenantDatabaseAdapter', () => {
         database: 'tenant_db',
         username: 'tenant_user',
         password: 'tenant_password',
+        dbType: 'postgresql' as const,
       })
     ).rejects.toThrow('Failed to connect to tenant database');
   });
@@ -108,6 +112,7 @@ describe('TenantDatabaseAdapter', () => {
       database: 'tenant_db',
       username: 'tenant_user',
       password: 'tenant_password',
+      dbType: 'postgresql' as const,
     });
 
     await expect(adapter.query('DROP TABLE users')).rejects.toThrow('read-only');
@@ -123,6 +128,7 @@ describe('TenantDatabaseAdapter', () => {
       database: 'tenant_db',
       username: 'tenant_user',
       password: 'tenant_password',
+      dbType: 'postgresql' as const,
     });
 
     await expect(adapter.disconnect()).resolves.toBeUndefined();
@@ -142,6 +148,7 @@ describe('TenantDatabaseAdapter', () => {
         database: 'tenant_db',
         username: 'tenant_user',
         password: 'bad-password',
+        dbType: 'postgresql' as const,
       })
     ).rejects.toThrow('Invalid credentials');
   });
@@ -160,7 +167,36 @@ describe('TenantDatabaseAdapter', () => {
         database: 'tenant_db',
         username: 'tenant_user',
         password: 'tenant_password',
+        dbType: 'postgresql' as const,
       })
     ).rejects.toThrow('Unable to reach tenant database host');
+  });
+
+  // Slice 4 — systemSchemaNames property
+  describe('systemSchemaNames', () => {
+    it('contains information_schema', () => {
+      const adapter = new TenantDatabaseAdapter();
+      expect(adapter.systemSchemaNames.has('information_schema')).toBe(true);
+    });
+
+    it('contains pg_catalog', () => {
+      const adapter = new TenantDatabaseAdapter();
+      expect(adapter.systemSchemaNames.has('pg_catalog')).toBe(true);
+    });
+
+    it('contains pg_toast', () => {
+      const adapter = new TenantDatabaseAdapter();
+      expect(adapter.systemSchemaNames.has('pg_toast')).toBe(true);
+    });
+
+    it('contains exactly three entries and no others', () => {
+      const adapter = new TenantDatabaseAdapter();
+      expect(adapter.systemSchemaNames.size).toBe(3);
+    });
+
+    it('does not contain public or any user schema', () => {
+      const adapter = new TenantDatabaseAdapter();
+      expect(adapter.systemSchemaNames.has('public')).toBe(false);
+    });
   });
 });

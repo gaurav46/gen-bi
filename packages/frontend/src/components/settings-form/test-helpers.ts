@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 
 export async function fillAllFields(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText(/host/i), 'localhost');
-  await user.type(screen.getByLabelText(/database/i), 'mydb');
+  await user.type(screen.getByLabelText('Database'), 'mydb');
   await user.type(screen.getByLabelText(/username/i), 'admin');
   await user.type(screen.getByLabelText(/password/i), 'secret');
 }

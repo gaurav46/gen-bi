@@ -25,6 +25,7 @@ const tenantConfig = {
   database: 'tenant_db',
   username: 'user',
   password: 'pass',
+  dbType: 'postgresql' as const,
 };
 
 const relevantColumns = [
@@ -59,8 +60,10 @@ describe('QueryService', () => {
     };
 
     tenantDatabasePort = {
+      systemSchemaNames: new Set<string>(),
       connect: vi.fn().mockResolvedValue(undefined),
       query: vi.fn().mockResolvedValue({ rows: [{ name: 'Alice', total: 100 }] }),
+      queryIndexes: vi.fn().mockResolvedValue({ rows: [] }),
       disconnect: vi.fn().mockResolvedValue(undefined),
     };
 
@@ -77,8 +80,19 @@ describe('QueryService', () => {
     const result = await service.query({ connectionId: 'conn-1', question: 'Show top customers' });
 
     expect(connectionsService.getTenantConnectionConfig).toHaveBeenCalledWith('conn-1');
-    expect(llmPort.generateQuery).toHaveBeenCalledWith(expect.any(String));
+    expect(llmPort.generateQuery).toHaveBeenCalledWith(expect.any(String), 'postgresql');
     expect(result.intent).toBe('top_customers');
+  });
+
+  it('passes sqlserver dbType to generateQuery when connection config has dbType sqlserver', async () => {
+    vi.mocked(connectionsService.getTenantConnectionConfig).mockResolvedValue({
+      ...tenantConfig,
+      dbType: 'sqlserver' as const,
+    });
+
+    await service.query({ connectionId: 'conn-1', question: 'Show top customers' });
+
+    expect(llmPort.generateQuery).toHaveBeenCalledWith(expect.any(String), 'sqlserver');
   });
 
   it('throws when connectionId not found', async () => {

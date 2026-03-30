@@ -31,6 +31,7 @@ describe('Query Integration: question -> embed -> retrieve -> generate -> valida
       getTenantConnectionConfig: vi.fn().mockResolvedValue({
         host: 'localhost', port: 5432,
         database: 'tenant_db', username: 'user', password: 'pass',
+        dbType: 'postgresql' as const,
       }),
     };
 
@@ -51,6 +52,7 @@ describe('Query Integration: question -> embed -> retrieve -> generate -> valida
     };
 
     tenantDatabasePort = {
+      systemSchemaNames: new Set<string>(),
       connect: vi.fn().mockResolvedValue(undefined),
       query: vi.fn().mockResolvedValue({
         rows: [
@@ -58,6 +60,7 @@ describe('Query Integration: question -> embed -> retrieve -> generate -> valida
           { name: 'Bob', total: 300 },
         ],
       }),
+      queryIndexes: vi.fn().mockResolvedValue({ rows: [] }),
       disconnect: vi.fn().mockResolvedValue(undefined),
     };
 

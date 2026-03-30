@@ -9,6 +9,7 @@ import type { TenantDatabasePort } from './tenant-database.port';
 describe('GET /schema/:connectionId/tables/:schema/:table/rows (integration)', () => {
   it('returns paginated rows with PK info through real controller → service wiring', async () => {
     const mockTenantDb: TenantDatabasePort = {
+      systemSchemaNames: new Set<string>(),
       connect: vi.fn(),
       query: vi.fn().mockImplementation(async (sql: string) => {
         if (sql.includes('count(*)')) return { rows: [{ count: '3' }] };
@@ -16,6 +17,7 @@ describe('GET /schema/:connectionId/tables/:schema/:table/rows (integration)', (
         if (sql.includes('PRIMARY KEY')) return { rows: [{ column_name: 'id' }] };
         return { rows: [] };
       }),
+      queryIndexes: vi.fn().mockResolvedValue({ rows: [] }),
       disconnect: vi.fn(),
     };
 
@@ -32,6 +34,7 @@ describe('GET /schema/:connectionId/tables/:schema/:table/rows (integration)', (
           useValue: {
             getTenantConnectionConfig: vi.fn().mockResolvedValue({
               host: 'localhost', port: 5432, database: 'testdb', username: 'user', password: 'pass',
+              dbType: 'postgresql' as const,
             }),
           },
         },

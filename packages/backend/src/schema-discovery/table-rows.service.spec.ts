@@ -10,6 +10,7 @@ const defaultConfig = {
   database: 'tenant_db',
   username: 'user',
   password: 'pass',
+  dbType: 'postgresql' as const,
 };
 
 describe('TableRowsService', () => {
@@ -23,8 +24,10 @@ describe('TableRowsService', () => {
     } as unknown as Pick<ConnectionsService, 'getTenantConnectionConfig'>;
 
     tenantDb = {
+      systemSchemaNames: new Set<string>(),
       connect: vi.fn(),
       query: vi.fn(),
+      queryIndexes: vi.fn().mockResolvedValue({ rows: [] }),
       disconnect: vi.fn(),
     };
 

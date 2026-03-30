@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
-import { ConnectionsService, PRISMA_CLIENT } from '../connections/connections.service';
+import { eq, and } from 'drizzle-orm';
+import { ConnectionsService } from '../connections/connections.service';
 import type { TenantDatabasePort } from './tenant-database.port';
 import type { EmbeddingPort } from './embedding.port';
 import { EMBEDDING_PORT } from './embedding.port';
@@ -7,9 +8,10 @@ import type { DescriptionSuggestionPort } from './description-suggestion.port';
 import { DESCRIPTION_SUGGESTION_PORT } from './description-suggestion.port';
 import { buildEmbeddingInputs } from './embedding-input';
 import { isAmbiguousColumnName } from './ambiguity';
+import { DRIZZLE_CLIENT, type AppDatabase } from '../infrastructure/drizzle/client';
+import * as tables from '../infrastructure/drizzle/schema';
 
 export const TENANT_DATABASE_PORT = 'TENANT_DATABASE_PORT';
-const SYSTEM_SCHEMA_NAMES = new Set(['information_schema', 'pg_catalog', 'pg_toast']);
 
 @Injectable()
 export class SchemaDiscoveryService {
@@ -19,7 +21,7 @@ export class SchemaDiscoveryService {
   constructor(
     private readonly connectionsService: ConnectionsService,
     @Inject(TENANT_DATABASE_PORT) private readonly tenantDatabasePort: TenantDatabasePort,
-    @Inject(PRISMA_CLIENT) private readonly prisma: any,
+    @Inject(DRIZZLE_CLIENT) private readonly db: AppDatabase,
     @Inject(EMBEDDING_PORT) private readonly embeddingPort: EmbeddingPort,
     @Optional() @Inject(DESCRIPTION_SUGGESTION_PORT) private readonly descriptionPort?: DescriptionSuggestionPort,
   ) {}
@@ -29,10 +31,12 @@ export class SchemaDiscoveryService {
   }
 
   async getDiscoveredTables(connectionId: string) {
-    return this.prisma.discoveredTable.findMany({
-      where: { connectionId },
-      include: { columns: true, foreignKeys: true, indexes: true },
-    });
+    const discoveredTableRows = await this.db
+      .select()
+      .from(tables.discoveredTables)
+      .where(eq(tables.discoveredTables.connectionId, connectionId));
+
+    return Promise.all(discoveredTableRows.map((table) => this.loadTableWithRelations(table)));
   }
 
   async analyzeSchemas(connectionId: string, schemas: string[]) {
@@ -71,12 +75,11 @@ export class SchemaDiscoveryService {
         schemas,
       );
 
-      const indexResult = await this.tenantDatabasePort.query(
-        `SELECT n.nspname AS schemaname, t.relname AS tablename, i.relname AS indexname, a.attname AS columnname, ix.indisunique AS is_unique FROM pg_index ix JOIN pg_class t ON t.oid = ix.indrelid JOIN pg_class i ON i.oid = ix.indexrelid JOIN pg_namespace n ON n.oid = t.relnamespace JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(ix.indkey) WHERE n.nspname IN (${placeholders})`,
-        schemas,
-      );
+      const indexResult = await this.tenantDatabasePort.queryIndexes(schemas);
 
-      await this.prisma.discoveredTable.deleteMany({ where: { connectionId } });
+      await this.db
+        .delete(tables.discoveredTables)
+        .where(eq(tables.discoveredTables.connectionId, connectionId));
 
       let current = 0;
       for (const tableRow of tablesResult.rows) {
@@ -91,6 +94,16 @@ export class SchemaDiscoveryService {
         const tableSchema = tableRow.table_schema as string;
         const tableName = tableRow.table_name as string;
 
+        const tableId = crypto.randomUUID();
+        const now = new Date();
+
+        await this.db.insert(tables.discoveredTables).values({
+          id: tableId,
+          connectionId,
+          schemaName: tableSchema,
+          tableName,
+        });
+
         const tableColumns = columnsResult.rows.filter(
           (c) => c.table_schema === tableSchema && c.table_name === tableName,
         );
@@ -103,37 +116,47 @@ export class SchemaDiscoveryService {
           (idx) => idx.schemaname === tableSchema && idx.tablename === tableName,
         );
 
-        await this.prisma.discoveredTable.create({
-          data: {
-            connectionId,
-            schemaName: tableSchema,
-            tableName,
-            columns: {
-              create: tableColumns.map((c) => ({
-                columnName: c.column_name as string,
-                dataType: c.data_type as string,
-                isNullable: c.is_nullable === 'YES',
-                ordinalPosition: Number(c.ordinal_position),
-              })),
-            },
-            foreignKeys: {
-              create: tableFks.map((fk) => ({
-                columnName: fk.column_name as string,
-                foreignTableSchema: fk.foreign_table_schema as string,
-                foreignTableName: fk.foreign_table_name as string,
-                foreignColumnName: fk.foreign_column_name as string,
-                constraintName: fk.constraint_name as string,
-              })),
-            },
-            indexes: {
-              create: tableIndexes.map((idx) => ({
-                indexName: idx.indexname as string,
-                columnName: idx.columnname as string,
-                isUnique: Boolean(idx.is_unique),
-              })),
-            },
-          },
-        });
+        if (tableColumns.length > 0) {
+          await this.db.insert(tables.discoveredColumns).values(
+            tableColumns.map((c) => ({
+              id: crypto.randomUUID(),
+              tableId,
+              columnName: c.column_name as string,
+              dataType: c.data_type as string,
+              isNullable: c.is_nullable === 'YES',
+              ordinalPosition: Number(c.ordinal_position),
+              updatedAt: now,
+            })),
+          );
+        }
+
+        if (tableFks.length > 0) {
+          await this.db.insert(tables.discoveredForeignKeys).values(
+            tableFks.map((fk) => ({
+              id: crypto.randomUUID(),
+              tableId,
+              columnName: fk.column_name as string,
+              foreignTableSchema: fk.foreign_table_schema as string,
+              foreignTableName: fk.foreign_table_name as string,
+              foreignColumnName: fk.foreign_column_name as string,
+              constraintName: fk.constraint_name as string,
+              updatedAt: now,
+            })),
+          );
+        }
+
+        if (tableIndexes.length > 0) {
+          await this.db.insert(tables.discoveredIndexes).values(
+            tableIndexes.map((idx) => ({
+              id: crypto.randomUUID(),
+              tableId,
+              indexName: idx.indexname as string,
+              columnName: idx.columnname as string,
+              isUnique: Boolean(idx.is_unique),
+              updatedAt: now,
+            })),
+          );
+        }
       }
 
       this.progress = { status: 'introspected', current, total: tablesResult.rows.length, message: 'Introspection complete' };
@@ -149,10 +172,20 @@ export class SchemaDiscoveryService {
   }
 
   async getAnnotations(connectionId: string) {
-    const tables = await this.prisma.discoveredTable.findMany({
-      where: { connectionId },
-      include: { columns: true },
-    });
+    const discoveredTableRows = await this.db
+      .select()
+      .from(tables.discoveredTables)
+      .where(eq(tables.discoveredTables.connectionId, connectionId));
+
+    const tableWithColumns = await Promise.all(
+      discoveredTableRows.map(async (table) => {
+        const columns = await this.db
+          .select()
+          .from(tables.discoveredColumns)
+          .where(eq(tables.discoveredColumns.tableId, table.id));
+        return { ...table, columns };
+      }),
+    );
 
     const ambiguousColumns: {
       columnId: string;
@@ -163,8 +196,8 @@ export class SchemaDiscoveryService {
       neighborColumns: string[];
     }[] = [];
 
-    for (const table of tables) {
-      const allColumnNames = table.columns.map((c: any) => c.columnName as string);
+    for (const table of tableWithColumns) {
+      const allColumnNames = table.columns.map((c) => c.columnName);
       for (const col of table.columns) {
         if (isAmbiguousColumnName(col.columnName)) {
           ambiguousColumns.push({
@@ -173,7 +206,7 @@ export class SchemaDiscoveryService {
             schemaName: table.schemaName,
             columnName: col.columnName,
             dataType: col.dataType,
-            neighborColumns: allColumnNames.filter((n: string) => n !== col.columnName),
+            neighborColumns: allColumnNames.filter((n) => n !== col.columnName),
           });
         }
       }
@@ -218,13 +251,23 @@ export class SchemaDiscoveryService {
     this.progress = { status: 'analyzing', current: 0, total: 0, message: 'Generating embeddings...' };
 
     try {
-      const tables = await this.prisma.discoveredTable.findMany({
-        where: { connectionId },
-        include: { columns: true },
-      });
+      const discoveredTableRows = await this.db
+        .select()
+        .from(tables.discoveredTables)
+        .where(eq(tables.discoveredTables.connectionId, connectionId));
 
-      const allColumns = tables.flatMap((table: any) =>
-        table.columns.map((col: any) => ({
+      const tableWithColumns = await Promise.all(
+        discoveredTableRows.map(async (table) => {
+          const columns = await this.db
+            .select()
+            .from(tables.discoveredColumns)
+            .where(eq(tables.discoveredColumns.tableId, table.id));
+          return { ...table, columns };
+        }),
+      );
+
+      const allColumns = tableWithColumns.flatMap((table) =>
+        table.columns.map((col) => ({
           tableId: table.id,
           columnId: col.id,
           tableName: table.tableName,
@@ -237,10 +280,21 @@ export class SchemaDiscoveryService {
       const inputs = buildEmbeddingInputs(allColumns);
       const embeddings = await this.embeddingPort.generateEmbeddings(inputs);
 
-      await this.prisma.$executeRaw`DELETE FROM column_embeddings WHERE connection_id = ${connectionId}`;
-      for (let i = 0; i < inputs.length; i++) {
-        const vector = `[${embeddings[i].join(',')}]`;
-        await this.prisma.$executeRaw`INSERT INTO column_embeddings (id, connection_id, table_id, column_id, input_text, embedding, created_at) VALUES (gen_random_uuid(), ${connectionId}, ${allColumns[i].tableId}, ${allColumns[i].columnId}, ${inputs[i]}, ${vector}::vector, now())`;
+      await this.db
+        .delete(tables.columnEmbeddings)
+        .where(eq(tables.columnEmbeddings.connectionId, connectionId));
+
+      if (inputs.length > 0) {
+        await this.db.insert(tables.columnEmbeddings).values(
+          inputs.map((inputText, i) => ({
+            id: crypto.randomUUID(),
+            connectionId,
+            tableId: allColumns[i].tableId,
+            columnId: allColumns[i].columnId,
+            inputText,
+            embedding: embeddings[i],
+          })),
+        );
       }
 
       this.progress = { status: 'done', current: allColumns.length, total: allColumns.length, message: 'Analysis complete' };
@@ -253,10 +307,10 @@ export class SchemaDiscoveryService {
 
   async saveAnnotations(connectionId: string, annotations: { columnId: string; description: string }[]) {
     for (const annotation of annotations) {
-      await this.prisma.discoveredColumn.update({
-        where: { id: annotation.columnId },
-        data: { description: annotation.description },
-      });
+      await this.db
+        .update(tables.discoveredColumns)
+        .set({ description: annotation.description })
+        .where(eq(tables.discoveredColumns.id, annotation.columnId));
     }
     return { updated: annotations.length };
   }
@@ -274,7 +328,7 @@ export class SchemaDiscoveryService {
       const schemas = result.rows
         .map((row) => row.schema_name)
         .filter((schemaName): schemaName is string => typeof schemaName === 'string')
-        .filter((schemaName) => !SYSTEM_SCHEMA_NAMES.has(schemaName))
+        .filter((schemaName) => !this.tenantDatabasePort.systemSchemaNames.has(schemaName))
         .filter((schemaName) => !schemaName.startsWith('pg_temp_'))
         .filter((schemaName) => !schemaName.startsWith('pg_toast_temp_'));
 
@@ -286,5 +340,14 @@ export class SchemaDiscoveryService {
     } finally {
       await this.tenantDatabasePort.disconnect();
     }
+  }
+
+  private async loadTableWithRelations(table: typeof tables.discoveredTables.$inferSelect) {
+    const [columns, foreignKeys, indexes] = await Promise.all([
+      this.db.select().from(tables.discoveredColumns).where(eq(tables.discoveredColumns.tableId, table.id)),
+      this.db.select().from(tables.discoveredForeignKeys).where(eq(tables.discoveredForeignKeys.tableId, table.id)),
+      this.db.select().from(tables.discoveredIndexes).where(eq(tables.discoveredIndexes.tableId, table.id)),
+    ]);
+    return { ...table, columns, foreignKeys, indexes };
   }
 }

@@ -2,15 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConnectionsController } from './connections.controller';
 import { ConnectionsService } from './connections.service';
-import { SchemaDiscoveryService } from '../schema-discovery/schema-discovery.service';
 
 const mockService = {
   create: vi.fn(),
   findOne: vi.fn(),
-};
-
-const mockSchemaDiscoveryService = {
-  testConnection: vi.fn(),
 };
 
 describe('ConnectionsController', () => {
@@ -22,7 +17,6 @@ describe('ConnectionsController', () => {
       controllers: [ConnectionsController],
       providers: [
         { provide: ConnectionsService, useValue: mockService },
-        { provide: SchemaDiscoveryService, useValue: mockSchemaDiscoveryService },
       ],
     }).compile();
 
@@ -56,6 +50,39 @@ describe('ConnectionsController', () => {
       databaseName: 'mydb',
       username: 'admin',
       password: 'secret',
+    });
+  });
+
+  it('POST /api/connections with dbType sqlserver passes dbType to service', async () => {
+    const savedConfig = {
+      id: 'test-id',
+      host: 'sqlserver-host',
+      port: 1433,
+      databaseName: 'mydb',
+      username: 'sa',
+      dbType: 'sqlserver',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    mockService.create.mockResolvedValue(savedConfig);
+
+    const result = await controller.create({
+      host: 'sqlserver-host',
+      port: 1433,
+      databaseName: 'mydb',
+      username: 'sa',
+      password: 'secret',
+      dbType: 'sqlserver',
+    });
+
+    expect(result).toEqual(savedConfig);
+    expect(mockService.create).toHaveBeenCalledWith({
+      host: 'sqlserver-host',
+      port: 1433,
+      databaseName: 'mydb',
+      username: 'sa',
+      password: 'secret',
+      dbType: 'sqlserver',
     });
   });
 

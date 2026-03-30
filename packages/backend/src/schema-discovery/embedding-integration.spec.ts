@@ -13,10 +13,12 @@ describe('Embedding Integration', () => {
         database: 'tenant_db',
         username: 'user',
         password: 'pass',
+        dbType: 'postgresql' as const,
       }),
     } as unknown as ConnectionsService;
 
     const tenantDatabasePort: TenantDatabasePort = {
+      systemSchemaNames: new Set<string>(),
       connect: vi.fn().mockResolvedValue(undefined),
       query: vi.fn().mockImplementation(async (sql: string) => {
         if (sql.includes('information_schema.tables')) {
@@ -32,6 +34,7 @@ describe('Embedding Integration', () => {
         }
         return { rows: [] };
       }),
+      queryIndexes: vi.fn().mockResolvedValue({ rows: [] }),
       disconnect: vi.fn().mockResolvedValue(undefined),
     };
 
@@ -39,25 +42,26 @@ describe('Embedding Integration', () => {
       generateEmbeddings: vi.fn(),
     };
 
-    const mockPrisma = {
-      discoveredTable: {
-        deleteMany: vi.fn().mockResolvedValue({}),
-        create: vi.fn().mockResolvedValue({}),
-        findMany: vi.fn().mockResolvedValue([]),
-      },
-      $executeRaw: vi.fn().mockResolvedValue(undefined),
+    const insertValues = vi.fn().mockResolvedValue([]);
+    const mockDb = {
+      insert: vi.fn().mockReturnValue({ values: insertValues }),
+      delete: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) }),
+      select: vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([]) }),
+      }),
+      update: vi.fn().mockReturnValue({ set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) }) }),
     };
 
     const service = new SchemaDiscoveryService(
       connectionsService,
       tenantDatabasePort,
-      mockPrisma,
+      mockDb as any,
       embeddingPort,
     );
 
     await service.analyzeSchemas('conn-id', ['public']);
 
-    expect(mockPrisma.discoveredTable.create).toHaveBeenCalled();
+    expect(mockDb.insert).toHaveBeenCalled();
     expect(embeddingPort.generateEmbeddings).not.toHaveBeenCalled();
 
     const finalStatus = service.getDiscoveryStatus();

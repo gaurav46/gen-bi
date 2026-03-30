@@ -24,7 +24,7 @@ describe('SettingsForm', () => {
     render(<SettingsForm />);
     expect(screen.getByLabelText(/host/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/port/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/database/i)).toBeInTheDocument();
+    expect(screen.getByLabelText('Database')).toBeInTheDocument();
     expect(screen.getByLabelText(/username/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
   });
@@ -41,7 +41,7 @@ describe('SettingsForm', () => {
     await user.type(screen.getByLabelText(/host/i), 'localhost');
     await user.clear(screen.getByLabelText(/port/i));
     await user.type(screen.getByLabelText(/port/i), '5432');
-    await user.type(screen.getByLabelText(/database/i), 'mydb');
+    await user.type(screen.getByLabelText('Database'), 'mydb');
     await user.type(screen.getByLabelText(/username/i), 'admin');
     await user.type(screen.getByLabelText(/password/i), 'secret');
 
@@ -59,7 +59,7 @@ describe('SettingsForm', () => {
 
     expect(screen.getByLabelText(/host/i)).toHaveValue('myhost');
     expect(screen.getByLabelText(/port/i)).toHaveValue('5433');
-    expect(screen.getByLabelText(/database/i)).toHaveValue('proddb');
+    expect(screen.getByLabelText('Database')).toHaveValue('proddb');
     expect(screen.getByLabelText(/username/i)).toHaveValue('dbuser');
     expect(screen.getByLabelText(/password/i)).toHaveValue('pass123');
   });
@@ -102,6 +102,7 @@ describe('SettingsForm', () => {
         databaseName: 'mydb',
         username: 'admin',
         password: 'secret',
+        dbType: 'postgresql',
       }),
     }));
 
@@ -120,6 +121,7 @@ describe('SettingsForm', () => {
         databaseName: 'proddb',
         username: 'dbuser',
         password: 'dbpass',
+        dbType: 'postgresql',
       }),
     });
     vi.stubGlobal('fetch', fetchSpy);
@@ -130,7 +132,7 @@ describe('SettingsForm', () => {
 
     expect(screen.getByLabelText(/host/i)).toHaveValue('dbhost');
     expect(screen.getByLabelText(/port/i)).toHaveValue('5433');
-    expect(screen.getByLabelText(/database/i)).toHaveValue('proddb');
+    expect(screen.getByLabelText('Database')).toHaveValue('proddb');
     expect(screen.getByLabelText(/username/i)).toHaveValue('dbuser');
     expect(screen.getByLabelText(/password/i)).toHaveValue('dbpass');
 

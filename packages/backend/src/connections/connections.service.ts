@@ -1,8 +1,9 @@
 import { Injectable, Inject, NotFoundException } from '@nestjs/common';
+import { eq } from 'drizzle-orm';
 import { encrypt, decrypt } from './encryption';
 import type { TenantConnectionConfig } from '../schema-discovery/tenant-database.port';
-
-export const PRISMA_CLIENT = 'PRISMA_CLIENT';
+import { DRIZZLE_CLIENT, type AppDatabase } from '../infrastructure/drizzle/client';
+import * as tables from '../infrastructure/drizzle/schema';
 
 interface CreateConnectionDto {
   host: string;
@@ -10,24 +11,34 @@ interface CreateConnectionDto {
   databaseName: string;
   username: string;
   password: string;
+  dbType?: 'postgresql' | 'sqlserver';
+  encrypt?: boolean;
 }
 
 @Injectable()
 export class ConnectionsService {
-  constructor(@Inject(PRISMA_CLIENT) private readonly prisma: any) {}
+  constructor(@Inject(DRIZZLE_CLIENT) private readonly db: AppDatabase) {}
 
   async create(dto: CreateConnectionDto) {
     const encryptedPassword = encrypt(dto.password);
+    const dbType = dto.dbType ?? 'postgresql';
 
-    const saved = await this.prisma.connectionConfig.create({
-      data: {
+    const rows = await this.db
+      .insert(tables.connectionConfigs)
+      .values({
+        id: crypto.randomUUID(),
         host: dto.host,
         port: dto.port,
         databaseName: dto.databaseName,
         username: dto.username,
         encryptedPassword,
-      },
-    });
+        dbType,
+        encrypt: dto.encrypt ?? null,
+        updatedAt: new Date(),
+      })
+      .returning();
+
+    const saved = rows[0];
 
     return {
       id: saved.id,
@@ -35,6 +46,7 @@ export class ConnectionsService {
       port: saved.port,
       databaseName: saved.databaseName,
       username: saved.username,
+      dbType: saved.dbType as 'postgresql' | 'sqlserver',
       createdAt: saved.createdAt,
       updatedAt: saved.updatedAt,
     };
@@ -48,13 +60,18 @@ export class ConnectionsService {
       database: conn.databaseName,
       username: conn.username,
       password: conn.password,
+      dbType: conn.dbType,
+      encrypt: conn.encrypt ?? false,
     };
   }
 
   async findOne(id: string) {
-    const config = await this.prisma.connectionConfig.findUnique({
-      where: { id },
-    });
+    const rows = await this.db
+      .select()
+      .from(tables.connectionConfigs)
+      .where(eq(tables.connectionConfigs.id, id));
+
+    const config = rows[0];
 
     if (!config) throw new NotFoundException(`Connection config ${id} not found`);
 
@@ -65,6 +82,8 @@ export class ConnectionsService {
       databaseName: config.databaseName,
       username: config.username,
       password: decrypt(config.encryptedPassword),
+      dbType: (config.dbType ?? 'postgresql') as 'postgresql' | 'sqlserver',
+      encrypt: config.encrypt ?? false,
       createdAt: config.createdAt,
       updatedAt: config.updatedAt,
     };

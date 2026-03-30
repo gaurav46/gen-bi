@@ -4,6 +4,49 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ConnectionForm } from './ConnectionForm';
 import { fillAllFields, deferred } from './test-helpers';
 
+// Radix Select does not work reliably in jsdom (portal + pointer-event limitations).
+// Replace with a native <select> that calls onValueChange so behaviour tests can
+// interact with it using userEvent.selectOptions.
+vi.mock('@/components/ui/select', () => {
+  const React = require('react');
+
+  // We collect child SelectItem values and labels so we can build <option> elements.
+  // The Select root renders a native <select>; SelectItem registers via context.
+  const SelectContext = React.createContext<{ onValueChange?: (v: string) => void; value?: string }>({});
+
+  function Select({ value, onValueChange, children }: { value?: string; onValueChange?: (v: string) => void; children: React.ReactNode }) {
+    return React.createElement(SelectContext.Provider, { value: { onValueChange, value } }, children);
+  }
+
+  // SelectTrigger is the visible element — render as a label-associated native select.
+  function SelectTrigger({ id, children: _children }: { id?: string; children?: React.ReactNode }) {
+    return React.createElement('div', { id });
+  }
+
+  function SelectValue() { return null; }
+
+  // SelectContent wraps the items — render them so SelectItem is mounted.
+  function SelectContent({ children }: { children: React.ReactNode }) {
+    return React.createElement(React.Fragment, null, children);
+  }
+
+  // SelectItem renders a button so userEvent.click triggers onValueChange from context.
+  function SelectItem({ value, children }: { value: string; children: React.ReactNode }) {
+    const ctx = React.useContext(SelectContext);
+    return React.createElement(
+      'button',
+      {
+        type: 'button',
+        'data-testid': `select-item-${value}`,
+        onClick: () => ctx.onValueChange?.(value),
+      },
+      children,
+    );
+  }
+
+  return { Select, SelectTrigger, SelectValue, SelectContent, SelectItem };
+});
+
 describe('ConnectionForm', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -19,7 +62,7 @@ describe('ConnectionForm', () => {
     render(<ConnectionForm />);
     expect(screen.getByLabelText(/host/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/port/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/database/i)).toBeInTheDocument();
+    expect(screen.getByLabelText('Database')).toBeInTheDocument();
     expect(screen.getByLabelText(/username/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/connection string/i)).toBeInTheDocument();
@@ -37,7 +80,7 @@ describe('ConnectionForm', () => {
     await user.type(screen.getByLabelText(/host/i), 'localhost');
     await user.clear(screen.getByLabelText(/port/i));
     await user.type(screen.getByLabelText(/port/i), '5432');
-    await user.type(screen.getByLabelText(/database/i), 'mydb');
+    await user.type(screen.getByLabelText('Database'), 'mydb');
     await user.type(screen.getByLabelText(/username/i), 'admin');
     await user.type(screen.getByLabelText(/password/i), 'secret');
 
@@ -54,7 +97,7 @@ describe('ConnectionForm', () => {
 
     expect(screen.getByLabelText(/host/i)).toHaveValue('myhost');
     expect(screen.getByLabelText(/port/i)).toHaveValue('5433');
-    expect(screen.getByLabelText(/database/i)).toHaveValue('proddb');
+    expect(screen.getByLabelText('Database')).toHaveValue('proddb');
     expect(screen.getByLabelText(/username/i)).toHaveValue('dbuser');
     expect(screen.getByLabelText(/password/i)).toHaveValue('pass123');
   });
@@ -92,6 +135,7 @@ describe('ConnectionForm', () => {
         databaseName: 'mydb',
         username: 'admin',
         password: 'secret',
+        dbType: 'postgresql',
       }),
     }));
 
@@ -138,6 +182,7 @@ describe('ConnectionForm', () => {
         databaseName: 'proddb',
         username: 'dbuser',
         password: 'dbpass',
+        dbType: 'postgresql',
       }),
     }));
 
@@ -146,8 +191,170 @@ describe('ConnectionForm', () => {
 
     expect(screen.getByLabelText(/host/i)).toHaveValue('dbhost');
     expect(screen.getByLabelText(/port/i)).toHaveValue('5433');
-    expect(screen.getByLabelText(/database/i)).toHaveValue('proddb');
+    expect(screen.getByLabelText('Database')).toHaveValue('proddb');
     expect(screen.getByLabelText(/username/i)).toHaveValue('dbuser');
     expect(screen.getByLabelText(/password/i)).toHaveValue('dbpass');
+  });
+
+  // ── Slice 2: dbType selector ──────────────────────────────────────────────
+
+  it('renders database-type dropdown with PostgreSQL and SQL Server options', () => {
+    render(<ConnectionForm />);
+    expect(screen.getByTestId('select-item-postgresql')).toBeInTheDocument();
+    expect(screen.getByTestId('select-item-sqlserver')).toBeInTheDocument();
+    expect(screen.getByText('PostgreSQL')).toBeInTheDocument();
+    expect(screen.getByText('SQL Server')).toBeInTheDocument();
+  });
+
+  it('defaults to PostgreSQL on a new connection', () => {
+    render(<ConnectionForm />);
+    // Port default for postgresql is 5432 — confirms postgresql is selected
+    expect(screen.getByLabelText(/port/i)).toHaveValue('5432');
+  });
+
+  it('selecting SQL Server sets port to 1433 when port has not been manually edited', async () => {
+    const user = userEvent.setup();
+    render(<ConnectionForm />);
+
+    await user.click(screen.getByTestId('select-item-sqlserver'));
+
+    expect(screen.getByLabelText(/port/i)).toHaveValue('1433');
+  });
+
+  it('selecting PostgreSQL sets port to 5432 when port has not been manually edited', async () => {
+    const user = userEvent.setup();
+    render(<ConnectionForm />);
+
+    // Switch to SQL Server first, then back to PostgreSQL
+    await user.click(screen.getByTestId('select-item-sqlserver'));
+    await user.click(screen.getByTestId('select-item-postgresql'));
+
+    expect(screen.getByLabelText(/port/i)).toHaveValue('5432');
+  });
+
+  it('does not overwrite port after user manually edits it', async () => {
+    const user = userEvent.setup();
+    render(<ConnectionForm />);
+
+    // Manually change the port
+    await user.clear(screen.getByLabelText(/port/i));
+    await user.type(screen.getByLabelText(/port/i), '9999');
+
+    // Switching dbType should NOT overwrite the manually-set port
+    await user.click(screen.getByTestId('select-item-sqlserver'));
+    expect(screen.getByLabelText(/port/i)).toHaveValue('9999');
+
+    await user.click(screen.getByTestId('select-item-postgresql'));
+    expect(screen.getByLabelText(/port/i)).toHaveValue('9999');
+  });
+
+  it('loads stored dbType from API when editing an existing connection', async () => {
+    localStorage.setItem('connectionId', 'saved-id');
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        id: 'saved-id',
+        host: 'sqlhost',
+        port: 1433,
+        databaseName: 'SalesDB',
+        username: 'sa',
+        password: 'pass',
+        dbType: 'sqlserver',
+      }),
+    }));
+
+    render(<ConnectionForm />);
+    await screen.findByDisplayValue('sqlhost');
+
+    // Port should be locked to what the API returned, not overwritten by dbType logic
+    expect(screen.getByLabelText(/port/i)).toHaveValue('1433');
+    // Connection string should be hidden for SQL Server
+    expect(screen.queryByLabelText(/connection string/i)).not.toBeInTheDocument();
+  });
+
+  it('includes dbType in the POST request body', async () => {
+    const fetchSpy = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ id: 'new-conn' }),
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const user = userEvent.setup();
+    render(<ConnectionForm />);
+
+    await user.click(screen.getByTestId('select-item-sqlserver'));
+    await fillAllFields(user);
+    await user.click(screen.getByRole('button', { name: /connect/i }));
+
+    const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+    expect(body.dbType).toBe('sqlserver');
+  });
+
+  it('hides connection string for SQL Server', async () => {
+    const user = userEvent.setup();
+    render(<ConnectionForm />);
+
+    await user.click(screen.getByTestId('select-item-sqlserver'));
+
+    expect(screen.queryByLabelText(/connection string/i)).not.toBeInTheDocument();
+  });
+
+  it('shows connection string for PostgreSQL', () => {
+    render(<ConnectionForm />);
+    expect(screen.getByLabelText(/connection string/i)).toBeInTheDocument();
+  });
+
+  it('submit button is disabled when required fields are empty regardless of dbType', async () => {
+    const user = userEvent.setup();
+    render(<ConnectionForm />);
+
+    await user.click(screen.getByTestId('select-item-sqlserver'));
+
+    expect(screen.getByRole('button', { name: /connect/i })).toBeDisabled();
+  });
+
+  it('no Windows-auth or domain fields are rendered for SQL Server', async () => {
+    const user = userEvent.setup();
+    render(<ConnectionForm />);
+
+    await user.click(screen.getByTestId('select-item-sqlserver'));
+
+    expect(screen.queryByLabelText(/domain/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/windows auth/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/auth type/i)).not.toBeInTheDocument();
+  });
+
+  it('encrypt checkbox is not shown for postgresql', () => {
+    render(<ConnectionForm />);
+    expect(screen.queryByLabelText(/encrypt/i)).not.toBeInTheDocument();
+  });
+
+  it('encrypt checkbox is shown when dbType is sqlserver', async () => {
+    const user = userEvent.setup();
+    render(<ConnectionForm />);
+
+    await user.click(screen.getByTestId('select-item-sqlserver'));
+
+    expect(screen.getByLabelText(/encrypt/i)).toBeInTheDocument();
+  });
+
+  it('encrypt checkbox value is included in the submitted body for sqlserver', async () => {
+    const fetchSpy = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ id: 'new-conn' }),
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const user = userEvent.setup();
+    render(<ConnectionForm />);
+
+    await user.click(screen.getByTestId('select-item-sqlserver'));
+    await fillAllFields(user);
+    await user.click(screen.getByLabelText(/encrypt/i));
+    await user.click(screen.getByRole('button', { name: /connect/i }));
+
+    const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+    expect(body.encrypt).toBe(true);
   });
 });

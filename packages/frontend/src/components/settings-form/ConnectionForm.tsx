@@ -2,18 +2,29 @@ import { useState, useCallback, useEffect } from 'react';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { buildConnectionString, parseConnectionString } from './useConnectionString';
+
+type DbType = 'postgresql' | 'sqlserver';
+
+const DEFAULT_PORT: Record<DbType, string> = {
+  postgresql: '5432',
+  sqlserver: '1433',
+};
 
 type ConnectionFormProps = {
   onConnected?: (connectionId: string) => void;
 };
 
 export function ConnectionForm({ onConnected }: ConnectionFormProps) {
+  const [dbType, setDbType] = useState<DbType>('postgresql');
   const [host, setHost] = useState('');
   const [port, setPort] = useState('5432');
+  const [portManuallyEdited, setPortManuallyEdited] = useState(false);
   const [database, setDatabase] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [encrypt, setEncrypt] = useState(false);
   const [connectionString, setConnectionString] = useState('');
   const [isEditingConnectionString, setIsEditingConnectionString] = useState(false);
   const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
@@ -27,11 +38,14 @@ export function ConnectionForm({ onConnected }: ConnectionFormProps) {
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (!data) return;
+        setDbType(data.dbType ?? 'postgresql');
         setHost(data.host);
         setPort(String(data.port));
+        setPortManuallyEdited(true);
         setDatabase(data.databaseName);
         setUsername(data.username);
         setPassword(data.password);
+        setEncrypt(data.encrypt ?? false);
         setConnectionString(
           buildConnectionString({
             host: data.host,
@@ -53,11 +67,29 @@ export function ConnectionForm({ onConnected }: ConnectionFormProps) {
     [isEditingConnectionString],
   );
 
+  const handlePortChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setPort(value);
+    setPortManuallyEdited(true);
+    updateConnectionString(host, value, database, username, password);
+  };
+
   const handleFieldChange = (setter: (v: string) => void, field: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     setter(value);
     const fields = { host, port, database, username, password, [field]: value };
     updateConnectionString(fields.host, fields.port, fields.database, fields.username, fields.password);
+  };
+
+  const handleDbTypeChange = (value: string) => {
+    const nextDbType = value as DbType;
+    setDbType(nextDbType);
+    if (!portManuallyEdited) {
+      setPort(DEFAULT_PORT[nextDbType]);
+    }
+    if (nextDbType !== 'sqlserver') {
+      setEncrypt(false);
+    }
   };
 
   const handleConnectionStringChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -92,6 +124,8 @@ export function ConnectionForm({ onConnected }: ConnectionFormProps) {
           databaseName: database,
           username,
           password,
+          dbType,
+          ...(dbType === 'sqlserver' && { encrypt }),
         }),
       });
 
@@ -114,13 +148,25 @@ export function ConnectionForm({ onConnected }: ConnectionFormProps) {
   return (
     <div className="max-w-lg mx-auto">
       <div className="grid grid-cols-4 gap-3">
+        <div className="col-span-4 space-y-1.5">
+          <Label htmlFor="db-type" className="text-sm font-medium">Database Type</Label>
+          <Select value={dbType} onValueChange={handleDbTypeChange}>
+            <SelectTrigger id="db-type">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="postgresql">PostgreSQL</SelectItem>
+              <SelectItem value="sqlserver">SQL Server</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
         <div className="col-span-3 space-y-1.5">
           <Label htmlFor="host" className="text-sm font-medium">Host</Label>
           <Input id="host" value={host} onChange={handleFieldChange(setHost, 'host')} />
         </div>
         <div className="col-span-1 space-y-1.5">
           <Label htmlFor="port" className="text-sm font-medium">Port</Label>
-          <Input id="port" value={port} onChange={handleFieldChange(setPort, 'port')} />
+          <Input id="port" value={port} onChange={handlePortChange} />
         </div>
         <div className="col-span-4 space-y-1.5">
           <Label htmlFor="database" className="text-sm font-medium">Database</Label>
@@ -134,15 +180,28 @@ export function ConnectionForm({ onConnected }: ConnectionFormProps) {
           <Label htmlFor="password" className="text-sm font-medium">Password</Label>
           <Input id="password" type="password" value={password} onChange={handleFieldChange(setPassword, 'password')} />
         </div>
-        <div className="col-span-4 space-y-1.5">
-          <Label htmlFor="connection-string" className="text-sm font-medium">Connection String</Label>
-          <Input
-            id="connection-string"
-            value={connectionString}
-            onChange={handleConnectionStringChange}
-            onBlur={handleConnectionStringBlur}
-          />
-        </div>
+        {dbType === 'sqlserver' && (
+          <div className="col-span-4 flex items-center gap-2">
+            <input
+              id="encrypt"
+              type="checkbox"
+              checked={encrypt}
+              onChange={(e) => setEncrypt(e.target.checked)}
+            />
+            <Label htmlFor="encrypt" className="text-sm font-medium">Encrypt connection</Label>
+          </div>
+        )}
+        {dbType === 'postgresql' && (
+          <div className="col-span-4 space-y-1.5">
+            <Label htmlFor="connection-string" className="text-sm font-medium">Connection String</Label>
+            <Input
+              id="connection-string"
+              value={connectionString}
+              onChange={handleConnectionStringChange}
+              onBlur={handleConnectionStringBlur}
+            />
+          </div>
+        )}
         <div className="col-span-4">
           <Button className="w-full" disabled={!allFieldsFilled || status === 'connecting'} onClick={handleSubmit}>
             {status === 'connecting' ? 'Connecting...' : status === 'connected' ? 'Connected' : 'Connect'}

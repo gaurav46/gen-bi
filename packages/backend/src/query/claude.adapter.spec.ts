@@ -53,7 +53,7 @@ describe('ClaudeAdapter', () => {
 
   it('calls Anthropic SDK with structured output schema and parses response', async () => {
     const adapter = new ClaudeAdapter();
-    const result = await adapter.generateQuery('Show top customers');
+    const result = await adapter.generateQuery('Show top customers', 'postgresql');
 
     expect(result.intent).toBe('top_customers');
     expect(result.title).toBe('Top Customers by Revenue');
@@ -72,7 +72,7 @@ describe('ClaudeAdapter', () => {
 
   it('passes extended thinking config to Anthropic SDK', async () => {
     const adapter = new ClaudeAdapter();
-    await adapter.generateQuery('test prompt');
+    await adapter.generateQuery('test prompt', 'postgresql');
 
     const callArgs = mockCreate.mock.calls[0][0];
     expect(callArgs.thinking).toEqual({ type: 'enabled', budget_tokens: 10000 });
@@ -81,7 +81,7 @@ describe('ClaudeAdapter', () => {
 
   it('includes few-shot examples in the system prompt', async () => {
     const adapter = new ClaudeAdapter();
-    await adapter.generateQuery('any question');
+    await adapter.generateQuery('any question', 'postgresql');
 
     const callArgs = mockCreate.mock.calls[0][0];
     const systemPrompt = callArgs.system as string;
@@ -91,6 +91,24 @@ describe('ClaudeAdapter', () => {
 
     const selectMatches = systemPrompt.match(/SELECT/g) ?? [];
     expect(selectMatches.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('builds a PostgreSQL system prompt when dbType is postgresql', async () => {
+    const adapter = new ClaudeAdapter();
+    await adapter.generateQuery('any question', 'postgresql');
+
+    const callArgs = mockCreate.mock.lastCall![0];
+    expect(callArgs.system).toContain('PostgreSQL');
+    expect(callArgs.system).not.toContain('T-SQL');
+  });
+
+  it('builds a T-SQL system prompt when dbType is sqlserver', async () => {
+    const adapter = new ClaudeAdapter();
+    await adapter.generateQuery('any question', 'sqlserver');
+
+    const callArgs = mockCreate.mock.lastCall![0];
+    expect(callArgs.system).toContain('T-SQL');
+    expect(callArgs.system).not.toContain('PostgreSQL dialect');
   });
 
   it('ignores thinking blocks and parses only the text block', async () => {
@@ -114,7 +132,7 @@ describe('ClaudeAdapter', () => {
     });
 
     const adapter = new ClaudeAdapter();
-    const result = await adapter.generateQuery('test');
+    const result = await adapter.generateQuery('test', 'postgresql');
 
     expect(result.intent).toBe('top_customers');
     expect(result).not.toHaveProperty('thinking');
@@ -125,6 +143,6 @@ describe('ClaudeAdapter', () => {
 
     const adapter = new ClaudeAdapter();
 
-    await expect(adapter.generateQuery('test')).rejects.toThrow('API rate limit exceeded');
+    await expect(adapter.generateQuery('test', 'postgresql')).rejects.toThrow('API rate limit exceeded');
   });
 });

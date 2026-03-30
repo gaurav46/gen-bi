@@ -1,23 +1,15 @@
-import { Module, forwardRef } from '@nestjs/common';
-import { PrismaPg } from '@prisma/adapter-pg';
-import { PrismaClient } from '../../generated/prisma/client';
+import { Module } from '@nestjs/common';
 import { ConnectionsController } from './connections.controller';
-import { ConnectionsService, PRISMA_CLIENT } from './connections.service';
-import { SchemaDiscoveryModule } from '../schema-discovery/schema-discovery.module';
+import { ConnectionsService } from './connections.service';
+import { AppDatabaseModule } from '../database/app-database.module';
 
 @Module({
-  imports: [forwardRef(() => SchemaDiscoveryModule)],
+  imports: [AppDatabaseModule],
   controllers: [ConnectionsController],
   providers: [
     ConnectionsService,
-    {
-      provide: PRISMA_CLIENT,
-      useFactory: () => {
-        const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
-        return new PrismaClient({ adapter });
-      },
-    },
+    { provide: 'ConnectionsService', useExisting: ConnectionsService },
   ],
-  exports: [ConnectionsService, PRISMA_CLIENT],
+  exports: [ConnectionsService, 'ConnectionsService', AppDatabaseModule],
 })
 export class ConnectionsModule {}

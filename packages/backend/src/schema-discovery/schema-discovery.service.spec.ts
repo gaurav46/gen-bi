@@ -5,6 +5,7 @@ import type { TenantDatabasePort } from './tenant-database.port';
 import type { EmbeddingPort } from './embedding.port';
 import type { DescriptionSuggestionPort } from './description-suggestion.port';
 import { ConnectionsService } from '../connections/connections.service';
+import { DRIZZLE_CLIENT } from '../infrastructure/drizzle/client';
 
 const defaultTenantConfig = {
   host: 'localhost',
@@ -12,13 +13,40 @@ const defaultTenantConfig = {
   database: 'tenant_db',
   username: 'tenant_user',
   password: 'tenant_password',
+  dbType: 'postgresql' as const,
 };
+
+function makeSelectChain(resolvedValue: unknown[]) {
+  const where = vi.fn().mockResolvedValue(resolvedValue);
+  const from = vi.fn().mockReturnValue({ where });
+  return { from, where };
+}
+
+function makeInsertChain() {
+  const execute = vi.fn().mockResolvedValue([]);
+  const values = vi.fn().mockReturnValue({ execute, returning: vi.fn().mockResolvedValue([]) });
+  const insert = vi.fn().mockReturnValue({ values });
+  return { insert, values, execute };
+}
+
+function makeDeleteChain() {
+  const where = vi.fn().mockResolvedValue(undefined);
+  const deleteFrom = vi.fn().mockReturnValue({ where });
+  return { deleteFrom, where };
+}
+
+function makeUpdateChain() {
+  const where = vi.fn().mockResolvedValue(undefined);
+  const set = vi.fn().mockReturnValue({ where });
+  const update = vi.fn().mockReturnValue({ set });
+  return { update, set, where };
+}
 
 describe('SchemaDiscoveryService', () => {
   let service: SchemaDiscoveryService;
   let connectionsService: Pick<ConnectionsService, 'getTenantConnectionConfig'>;
   let tenantDatabasePort: TenantDatabasePort;
-  let mockPrisma: Record<string, any>;
+  let mockDb: Record<string, any>;
   let mockEmbeddingPort: EmbeddingPort;
   let mockDescriptionPort: DescriptionSuggestionPort;
 
@@ -28,18 +56,22 @@ describe('SchemaDiscoveryService', () => {
     } as unknown as Pick<ConnectionsService, 'getTenantConnectionConfig'>;
 
     tenantDatabasePort = {
+      systemSchemaNames: new Set(['information_schema', 'pg_catalog', 'pg_toast']),
       connect: vi.fn(),
       query: vi.fn(),
+      queryIndexes: vi.fn().mockResolvedValue({ rows: [] }),
       disconnect: vi.fn(),
     };
 
-    mockPrisma = {
-      discoveredTable: {
-        deleteMany: vi.fn().mockResolvedValue({}),
-        create: vi.fn().mockResolvedValue({}),
-        findMany: vi.fn().mockResolvedValue([]),
-      },
-      $executeRaw: vi.fn().mockResolvedValue(undefined),
+    const insertChain = makeInsertChain();
+    const deleteChain = makeDeleteChain();
+    const updateChain = makeUpdateChain();
+
+    mockDb = {
+      select: vi.fn().mockReturnValue(makeSelectChain([])),
+      insert: insertChain.insert,
+      delete: deleteChain.deleteFrom,
+      update: updateChain.update,
     };
 
     mockEmbeddingPort = {
@@ -55,7 +87,7 @@ describe('SchemaDiscoveryService', () => {
     service = new SchemaDiscoveryService(
       connectionsService as ConnectionsService,
       tenantDatabasePort,
-      mockPrisma,
+      mockDb as any,
       mockEmbeddingPort,
       mockDescriptionPort,
     );
@@ -176,16 +208,23 @@ describe('SchemaDiscoveryService', () => {
       expect.stringContaining('information_schema.columns'),
       expect.arrayContaining(['public']),
     );
-    expect(mockPrisma.discoveredTable.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          columns: { create: expect.arrayContaining([
-            expect.objectContaining({ columnName: 'id', dataType: 'uuid', isNullable: false, ordinalPosition: 1 }),
-            expect.objectContaining({ columnName: 'name', dataType: 'varchar', isNullable: true, ordinalPosition: 2 }),
-          ])},
-        }),
-      }),
-    );
+
+    const allInsertValuesCalls = mockDb.insert.mock.calls.flatMap((_: unknown, callIndex: number) => {
+      const valuesResult = mockDb.insert.mock.results[callIndex]?.value?.values;
+      return valuesResult ? valuesResult.mock.calls : [];
+    });
+
+    const columnInsertCall = allInsertValuesCalls.find((args: unknown[]) => {
+      const rows = Array.isArray(args[0]) ? args[0] : [];
+      return rows.some((r: Record<string, unknown>) => r.columnName !== undefined);
+    });
+
+    expect(columnInsertCall).toBeDefined();
+    const columnRows = columnInsertCall![0] as Record<string, unknown>[];
+    expect(columnRows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ columnName: 'id', dataType: 'uuid', isNullable: false, ordinalPosition: 1 }),
+      expect.objectContaining({ columnName: 'name', dataType: 'varchar', isNullable: true, ordinalPosition: 2 }),
+    ]));
   });
 
   it('analyzeSchemas discovers foreign keys via information_schema', async () => {
@@ -208,19 +247,28 @@ describe('SchemaDiscoveryService', () => {
       expect.stringContaining('FOREIGN KEY'),
       expect.arrayContaining(['public']),
     );
-    expect(mockPrisma.discoveredTable.create).toHaveBeenCalledWith(
+
+    const allInsertValuesCalls = mockDb.insert.mock.calls.flatMap((_: unknown, callIndex: number) => {
+      const valuesResult = mockDb.insert.mock.results[callIndex]?.value?.values;
+      return valuesResult ? valuesResult.mock.calls : [];
+    });
+
+    const fkInsertCall = allInsertValuesCalls.find((args: unknown[]) => {
+      const rows = Array.isArray(args[0]) ? args[0] : [];
+      return rows.some((r: Record<string, unknown>) => r.constraintName !== undefined);
+    });
+
+    expect(fkInsertCall).toBeDefined();
+    const fkRows = fkInsertCall![0] as Record<string, unknown>[];
+    expect(fkRows).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        data: expect.objectContaining({
-          foreignKeys: { create: [expect.objectContaining({
-            columnName: 'user_id',
-            foreignTableSchema: 'public',
-            foreignTableName: 'users',
-            foreignColumnName: 'id',
-            constraintName: 'fk_orders_users',
-          })]},
-        }),
+        columnName: 'user_id',
+        foreignTableSchema: 'public',
+        foreignTableName: 'users',
+        foreignColumnName: 'id',
+        constraintName: 'fk_orders_users',
       }),
-    );
+    ]));
   });
 
   it('analyzeSchemas discovers indexes with correct column names', async () => {
@@ -229,31 +277,37 @@ describe('SchemaDiscoveryService', () => {
       if (sql.includes('information_schema.tables')) {
         return { rows: [{ table_schema: 'public', table_name: 'users' }] };
       }
-      if (sql.includes('pg_index')) {
-        return { rows: [
-          { schemaname: 'public', tablename: 'users', indexname: 'users_pkey', columnname: 'id', is_unique: true },
-        ]};
-      }
       return { rows: [] };
+    });
+    vi.mocked(tenantDatabasePort.queryIndexes).mockResolvedValue({
+      rows: [
+        { schemaname: 'public', tablename: 'users', indexname: 'users_pkey', columnname: 'id', is_unique: true },
+      ],
     });
 
     await service.analyzeSchemas('conn-id', ['public']);
 
-    expect(tenantDatabasePort.query).toHaveBeenCalledWith(
-      expect.stringContaining('pg_index'),
-      expect.arrayContaining(['public']),
-    );
-    expect(mockPrisma.discoveredTable.create).toHaveBeenCalledWith(
+    expect(tenantDatabasePort.queryIndexes).toHaveBeenCalledWith(['public']);
+
+    const allInsertValuesCalls = mockDb.insert.mock.calls.flatMap((_: unknown, callIndex: number) => {
+      const valuesResult = mockDb.insert.mock.results[callIndex]?.value?.values;
+      return valuesResult ? valuesResult.mock.calls : [];
+    });
+
+    const indexInsertCall = allInsertValuesCalls.find((args: unknown[]) => {
+      const rows = Array.isArray(args[0]) ? args[0] : [];
+      return rows.some((r: Record<string, unknown>) => r.indexName !== undefined);
+    });
+
+    expect(indexInsertCall).toBeDefined();
+    const indexRows = indexInsertCall![0] as Record<string, unknown>[];
+    expect(indexRows).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        data: expect.objectContaining({
-          indexes: { create: [expect.objectContaining({
-            indexName: 'users_pkey',
-            columnName: 'id',
-            isUnique: true,
-          })]},
-        }),
+        indexName: 'users_pkey',
+        columnName: 'id',
+        isUnique: true,
       }),
-    );
+    ]));
   });
 
   it('analyzeSchemas deletes existing metadata and persists new results', async () => {
@@ -267,10 +321,14 @@ describe('SchemaDiscoveryService', () => {
 
     await service.analyzeSchemas('conn-id', ['public']);
 
-    expect(mockPrisma.discoveredTable.deleteMany).toHaveBeenCalledWith({ where: { connectionId: 'conn-id' } });
-    const deleteOrder = mockPrisma.discoveredTable.deleteMany.mock.invocationCallOrder[0];
-    const createOrder = mockPrisma.discoveredTable.create.mock.invocationCallOrder[0];
-    expect(deleteOrder).toBeLessThan(createOrder);
+    expect(mockDb.delete).toHaveBeenCalled();
+    const deleteWhere = mockDb.delete.mock.results[0].value.where;
+    expect(deleteWhere).toHaveBeenCalled();
+
+    expect(mockDb.insert).toHaveBeenCalled();
+    const deleteOrder = mockDb.delete.mock.invocationCallOrder[0];
+    const insertOrder = mockDb.insert.mock.invocationCallOrder[0];
+    expect(deleteOrder).toBeLessThan(insertOrder);
   });
 
   it('analyzeSchemas updates progress during analysis', async () => {
@@ -293,16 +351,22 @@ describe('SchemaDiscoveryService', () => {
   });
 
   it('getDiscoveredTables returns stored metadata with relations', async () => {
-    const stored = [{ id: '1', connectionId: 'conn-id', schemaName: 'public', tableName: 'users', columns: [], foreignKeys: [], indexes: [] }];
-    mockPrisma.discoveredTable.findMany.mockResolvedValue(stored);
+    const tableRow = { id: '1', connectionId: 'conn-id', schemaName: 'public', tableName: 'users', createdAt: new Date() };
+    const expectedResult = [{ ...tableRow, columns: [], foreignKeys: [], indexes: [] }];
+
+    let callCount = 0;
+    mockDb.select.mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        return makeSelectChain([tableRow]);
+      }
+      return makeSelectChain([]);
+    });
 
     const result = await service.getDiscoveredTables('conn-id');
 
-    expect(mockPrisma.discoveredTable.findMany).toHaveBeenCalledWith({
-      where: { connectionId: 'conn-id' },
-      include: { columns: true, foreignKeys: true, indexes: true },
-    });
-    expect(result).toEqual(stored);
+    expect(mockDb.select).toHaveBeenCalled();
+    expect(result).toEqual(expectedResult);
   });
 
   it('analyzeSchemas throws error when selected schema has zero tables', async () => {
@@ -328,7 +392,6 @@ describe('SchemaDiscoveryService', () => {
     const result = await service.analyzeSchemas('conn-id', ['public']);
 
     expect(result).toEqual({ tablesDiscovered: 120 });
-    expect(mockPrisma.discoveredTable.create).toHaveBeenCalledTimes(120);
     expect(service.getDiscoveryStatus().total).toBe(120);
   });
 
@@ -373,17 +436,19 @@ describe('SchemaDiscoveryService', () => {
   });
 
   it('getAnnotations returns ambiguous columns with AI-suggested descriptions', async () => {
-    mockPrisma.discoveredTable.findMany.mockResolvedValue([
-      {
-        id: 'table-1',
-        tableName: 'orders',
-        schemaName: 'public',
-        columns: [
-          { id: 'col-1', columnName: 'amt_1', dataType: 'numeric', description: null },
-          { id: 'col-2', columnName: 'email', dataType: 'varchar', description: null },
-        ],
-      },
-    ]);
+    let selectCallCount = 0;
+    mockDb.select.mockImplementation(() => {
+      selectCallCount++;
+      if (selectCallCount === 1) {
+        return makeSelectChain([
+          { id: 'table-1', connectionId: 'conn-id', tableName: 'orders', schemaName: 'public', createdAt: new Date() },
+        ]);
+      }
+      return makeSelectChain([
+        { id: 'col-1', tableId: 'table-1', columnName: 'amt_1', dataType: 'numeric', description: null, isNullable: false, ordinalPosition: 1, createdAt: new Date(), updatedAt: new Date() },
+        { id: 'col-2', tableId: 'table-1', columnName: 'email', dataType: 'varchar', description: null, isNullable: true, ordinalPosition: 2, createdAt: new Date(), updatedAt: new Date() },
+      ]);
+    });
 
     vi.mocked(mockDescriptionPort.suggestDescriptions).mockResolvedValue([
       { columnName: 'amt_1', tableName: 'orders', description: 'Order subtotal amount' },
@@ -403,16 +468,18 @@ describe('SchemaDiscoveryService', () => {
   });
 
   it('getAnnotations returns ambiguous columns with null suggestions when AI fails', async () => {
-    mockPrisma.discoveredTable.findMany.mockResolvedValue([
-      {
-        id: 'table-1',
-        tableName: 'orders',
-        schemaName: 'public',
-        columns: [
-          { id: 'col-1', columnName: 'amt_1', dataType: 'numeric', description: null },
-        ],
-      },
-    ]);
+    let selectCallCount = 0;
+    mockDb.select.mockImplementation(() => {
+      selectCallCount++;
+      if (selectCallCount === 1) {
+        return makeSelectChain([
+          { id: 'table-1', connectionId: 'conn-id', tableName: 'orders', schemaName: 'public', createdAt: new Date() },
+        ]);
+      }
+      return makeSelectChain([
+        { id: 'col-1', tableId: 'table-1', columnName: 'amt_1', dataType: 'numeric', description: null, isNullable: false, ordinalPosition: 1, createdAt: new Date(), updatedAt: new Date() },
+      ]);
+    });
 
     vi.mocked(mockDescriptionPort.suggestDescriptions).mockRejectedValue(new Error('API error'));
 
@@ -484,33 +551,36 @@ describe('SchemaDiscoveryService', () => {
   });
 
   it('saveAnnotations updates column descriptions in database', async () => {
-    mockPrisma.discoveredColumn = {
-      update: vi.fn().mockResolvedValue({}),
-    };
+    const updateWhere = vi.fn().mockResolvedValue(undefined);
+    const updateSet = vi.fn().mockReturnValue({ where: updateWhere });
+    mockDb.update.mockReturnValue({ set: updateSet });
 
     await service.saveAnnotations('conn-id', [
       { columnId: 'col-1', description: 'Order subtotal' },
     ]);
 
-    expect(mockPrisma.discoveredColumn.update).toHaveBeenCalledWith({
-      where: { id: 'col-1' },
-      data: { description: 'Order subtotal' },
-    });
+    expect(mockDb.update).toHaveBeenCalled();
+    expect(updateSet).toHaveBeenCalledWith({ description: 'Order subtotal' });
+    expect(updateWhere).toHaveBeenCalled();
   });
 
   it('embedColumns reads columns with descriptions and generates embeddings', async () => {
-    mockPrisma.discoveredTable.findMany.mockResolvedValue([
-      {
-        id: 'table-1',
-        connectionId: 'conn-id',
-        schemaName: 'public',
-        tableName: 'orders',
-        columns: [
-          { id: 'col-1', columnName: 'amt_1', dataType: 'numeric', description: 'Order subtotal amount' },
-          { id: 'col-2', columnName: 'email', dataType: 'varchar', description: null },
-        ],
-      },
-    ]);
+    let selectCallCount = 0;
+    mockDb.select.mockImplementation(() => {
+      selectCallCount++;
+      if (selectCallCount === 1) {
+        return makeSelectChain([
+          { id: 'table-1', connectionId: 'conn-id', schemaName: 'public', tableName: 'orders', createdAt: new Date() },
+        ]);
+      }
+      return makeSelectChain([
+        { id: 'col-1', tableId: 'table-1', columnName: 'amt_1', dataType: 'numeric', description: 'Order subtotal amount', isNullable: false, ordinalPosition: 1, createdAt: new Date(), updatedAt: new Date() },
+        { id: 'col-2', tableId: 'table-1', columnName: 'email', dataType: 'varchar', description: null, isNullable: true, ordinalPosition: 2, createdAt: new Date(), updatedAt: new Date() },
+      ]);
+    });
+
+    const deleteWhere = vi.fn().mockResolvedValue(undefined);
+    mockDb.delete.mockReturnValue({ where: deleteWhere });
 
     await service.embedColumns('conn-id');
 
@@ -519,16 +589,100 @@ describe('SchemaDiscoveryService', () => {
       'orders.email varchar',
     ]);
 
-    expect(mockPrisma.$executeRaw).toHaveBeenCalled();
+    expect(mockDb.delete).toHaveBeenCalled();
+    expect(mockDb.insert).toHaveBeenCalled();
     expect(service.getDiscoveryStatus().status).toBe('done');
+  });
+
+  it('embedColumns inserts rows with id values that are UUID strings (crypto.randomUUID format)', async () => {
+    let selectCallCount = 0;
+    mockDb.select.mockImplementation(() => {
+      selectCallCount++;
+      if (selectCallCount === 1) {
+        return makeSelectChain([
+          { id: 'table-1', connectionId: 'conn-id', schemaName: 'public', tableName: 'orders', createdAt: new Date() },
+        ]);
+      }
+      return makeSelectChain([
+        { id: 'col-1', tableId: 'table-1', columnName: 'total', dataType: 'numeric', description: null, isNullable: false, ordinalPosition: 1, createdAt: new Date(), updatedAt: new Date() },
+      ]);
+    });
+
+    const capturedValues: unknown[] = [];
+    const insertChain = makeInsertChain();
+    insertChain.values.mockImplementation((rows: unknown) => {
+      capturedValues.push(rows);
+      return { execute: vi.fn().mockResolvedValue([]), returning: vi.fn().mockResolvedValue([]) };
+    });
+    mockDb.insert = insertChain.insert;
+    mockDb.delete.mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) });
+
+    vi.mocked(mockEmbeddingPort.generateEmbeddings).mockResolvedValue([[0.1, 0.2, 0.3]]);
+
+    await service.embedColumns('conn-id');
+
+    expect(capturedValues.length).toBeGreaterThan(0);
+    const insertedRows = capturedValues[0] as Array<Record<string, unknown>>;
+    expect(Array.isArray(insertedRows)).toBe(true);
+    const row = insertedRows[0];
+    expect(typeof row.id).toBe('string');
+    // UUID v4 format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+    expect(row.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  });
+
+  it('embedColumns inserts embedding as plain number[] with no cast syntax', async () => {
+    const embeddingVector = [0.1, 0.2, 0.3, 0.4];
+
+    let selectCallCount = 0;
+    mockDb.select.mockImplementation(() => {
+      selectCallCount++;
+      if (selectCallCount === 1) {
+        return makeSelectChain([
+          { id: 'table-1', connectionId: 'conn-id', schemaName: 'public', tableName: 'orders', createdAt: new Date() },
+        ]);
+      }
+      return makeSelectChain([
+        { id: 'col-1', tableId: 'table-1', columnName: 'total', dataType: 'numeric', description: null, isNullable: false, ordinalPosition: 1, createdAt: new Date(), updatedAt: new Date() },
+      ]);
+    });
+
+    const capturedValues: unknown[] = [];
+    const insertChain = makeInsertChain();
+    insertChain.values.mockImplementation((rows: unknown) => {
+      capturedValues.push(rows);
+      return { execute: vi.fn().mockResolvedValue([]), returning: vi.fn().mockResolvedValue([]) };
+    });
+    mockDb.insert = insertChain.insert;
+    mockDb.delete.mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) });
+
+    vi.mocked(mockEmbeddingPort.generateEmbeddings).mockResolvedValue([embeddingVector]);
+
+    await service.embedColumns('conn-id');
+
+    expect(capturedValues.length).toBeGreaterThan(0);
+    const insertedRows = capturedValues[0] as Array<Record<string, unknown>>;
+    const row = insertedRows[0];
+
+    // Must be a plain array — not a string, not an object with cast syntax
+    expect(Array.isArray(row.embedding)).toBe(true);
+    expect(row.embedding).toEqual(embeddingVector);
+
+    // Serialising should not produce any vector cast syntax
+    const serialised = JSON.stringify(row.embedding);
+    expect(serialised).not.toContain('::vector');
+    expect(serialised).not.toContain('gen_random_uuid');
   });
 
   it('embedColumns rejects when already embedding', async () => {
     let resolveFind: () => void;
     const blockingPromise = new Promise<void>((r) => { resolveFind = r; });
-    mockPrisma.discoveredTable.findMany.mockImplementation(async () => {
-      await blockingPromise;
-      return [{ id: 'table-1', connectionId: 'conn-id', schemaName: 'public', tableName: 'orders', columns: [] }];
+
+    mockDb.select.mockImplementation(() => {
+      const where = vi.fn().mockImplementation(async () => {
+        await blockingPromise;
+        return [{ id: 'table-1', connectionId: 'conn-id', schemaName: 'public', tableName: 'orders', createdAt: new Date() }];
+      });
+      return { from: vi.fn().mockReturnValue({ where }) };
     });
 
     const first = service.embedColumns('conn-id');
@@ -538,5 +692,81 @@ describe('SchemaDiscoveryService', () => {
 
     resolveFind!();
     await first;
+  });
+
+  // Slice 4 — systemSchemaNames delegation
+  describe('systemSchemaNames delegation', () => {
+    it('filters only the schemas present in the port systemSchemaNames set when the set is custom', async () => {
+      const customPort: TenantDatabasePort = {
+        systemSchemaNames: new Set(['sys', 'INFORMATION_SCHEMA']),
+        connect: vi.fn(),
+        query: vi.fn().mockResolvedValue({
+          rows: [
+            { schema_name: 'dbo' },
+            { schema_name: 'sys' },
+            { schema_name: 'INFORMATION_SCHEMA' },
+          ],
+        }),
+        disconnect: vi.fn(),
+      };
+
+      vi.mocked(connectionsService.getTenantConnectionConfig).mockResolvedValue(defaultTenantConfig);
+
+      const customService = new SchemaDiscoveryService(
+        connectionsService as ConnectionsService,
+        customPort,
+        mockDb as any,
+        mockEmbeddingPort,
+        mockDescriptionPort,
+      );
+
+      const result = await customService.testConnection('conn-id');
+
+      expect(result.schemas).toEqual(['dbo']);
+    });
+
+    it('does not filter schemas that are absent from the port systemSchemaNames set', async () => {
+      const emptySetPort: TenantDatabasePort = {
+        systemSchemaNames: new Set(),
+        connect: vi.fn(),
+        query: vi.fn().mockResolvedValue({
+          rows: [
+            { schema_name: 'public' },
+            { schema_name: 'analytics' },
+          ],
+        }),
+        disconnect: vi.fn(),
+      };
+
+      vi.mocked(connectionsService.getTenantConnectionConfig).mockResolvedValue(defaultTenantConfig);
+
+      const emptySetService = new SchemaDiscoveryService(
+        connectionsService as ConnectionsService,
+        emptySetPort,
+        mockDb as any,
+        mockEmbeddingPort,
+        mockDescriptionPort,
+      );
+
+      const result = await emptySetService.testConnection('conn-id');
+
+      expect(result.schemas).toEqual(['public', 'analytics']);
+    });
+
+    it('retains existing PostgreSQL filtering behaviour when the adapter carries the PostgreSQL set', async () => {
+      vi.mocked(connectionsService.getTenantConnectionConfig).mockResolvedValue(defaultTenantConfig);
+      vi.mocked(tenantDatabasePort.query).mockResolvedValue({
+        rows: [
+          { schema_name: 'app' },
+          { schema_name: 'information_schema' },
+          { schema_name: 'pg_catalog' },
+          { schema_name: 'pg_toast' },
+        ],
+      });
+
+      const result = await service.testConnection('conn-id');
+
+      expect(result.schemas).toEqual(['app']);
+    });
   });
 });

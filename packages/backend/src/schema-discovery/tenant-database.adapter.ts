@@ -4,11 +4,13 @@ import type { QueryResult, TenantConnectionConfig, TenantDatabasePort } from './
 
 @Injectable()
 export class TenantDatabaseAdapter implements TenantDatabasePort {
+  readonly systemSchemaNames: ReadonlySet<string> = new Set(['information_schema', 'pg_catalog', 'pg_toast']);
+
   private readonly logger = new Logger(TenantDatabaseAdapter.name);
   private client: Client | null = null;
 
   async connect(config: TenantConnectionConfig): Promise<void> {
-    this.logger.log(`Connecting to tenant database at ${config.host}:${config.port}/${config.database}`);
+    this.logger.log(`Connecting to ${config.dbType} tenant database at ${config.host}:${config.port}/${config.database}`);
     this.client = new Client({
       host: config.host,
       port: config.port,
@@ -34,6 +36,14 @@ export class TenantDatabaseAdapter implements TenantDatabasePort {
 
       throw new Error(`Failed to connect to tenant database: ${message ?? 'Unknown connection error'}`);
     }
+  }
+
+  async queryIndexes(schemas: string[]): Promise<QueryResult> {
+    const placeholders = schemas.map((_, i) => `$${i + 1}`).join(', ');
+    return this.query(
+      `SELECT n.nspname AS schemaname, t.relname AS tablename, i.relname AS indexname, a.attname AS columnname, ix.indisunique AS is_unique FROM pg_index ix JOIN pg_class t ON t.oid = ix.indrelid JOIN pg_class i ON i.oid = ix.indexrelid JOIN pg_namespace n ON n.oid = t.relnamespace JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(ix.indkey) WHERE n.nspname IN (${placeholders})`,
+      schemas,
+    );
   }
 
   async query(sql: string, params?: unknown[]): Promise<QueryResult> {

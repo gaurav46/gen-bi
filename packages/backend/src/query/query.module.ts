@@ -5,7 +5,7 @@ import { QueryService } from './query.service';
 import { QueryController } from './query.controller';
 import { ClaudeAdapter } from './claude.adapter';
 import { LLM_PORT } from './llm.port';
-import { PrismaSchemaRetrievalAdapter } from './prisma-schema-retrieval.adapter';
+import { DrizzleSchemaRetrievalAdapter } from './drizzle-schema-retrieval.adapter';
 import { SCHEMA_RETRIEVAL_PORT } from './schema-retrieval.port';
 
 @Module({
@@ -21,10 +21,10 @@ import { SCHEMA_RETRIEVAL_PORT } from './schema-retrieval.port';
       provide: LLM_PORT,
       useExisting: ClaudeAdapter,
     },
-    PrismaSchemaRetrievalAdapter,
+    DrizzleSchemaRetrievalAdapter,
     {
       provide: SCHEMA_RETRIEVAL_PORT,
-      useExisting: PrismaSchemaRetrievalAdapter,
+      useExisting: DrizzleSchemaRetrievalAdapter,
     },
   ],
 })

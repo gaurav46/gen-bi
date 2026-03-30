@@ -52,7 +52,7 @@ export class QueryService {
 
     try {
       for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-        const llmResponse = await this.llmPort.generateQuery(currentPrompt);
+        const llmResponse = await this.llmPort.generateQuery(currentPrompt, config.dbType);
         this.logger.log(`[Attempt ${attempt}/${MAX_ATTEMPTS}] Generated SQL: ${llmResponse.sql}`);
 
         const selectValidation = validateSelectOnly(llmResponse.sql);
